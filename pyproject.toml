@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ts-forecasting-benchmark"
+version = "0.1.0"
+description = "Benchmark of classical, statistical and ML forecasting approaches"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+authors = [{ name = "Gunjan Rajgure" }]
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scipy>=1.13",
+    "statsmodels>=0.14",
+    "statsforecast>=1.7",
+    "prophet>=1.1.5",
+    "lightgbm>=4.3",
+    "matplotlib>=3.8",
+    "pyarrow>=16.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "pytest>=8.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ts_forecasting"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ts_forecasting"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra -q --strict-markers"
+markers = [
+    "integration: tests that need running external services (deselect with '-m \"not integration\"')",
+]
