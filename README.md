@@ -86,12 +86,12 @@ backtest windows, the random seed, and parallelism. No secrets are needed.
 
 ### Run the benchmark
 ```bash
+make data                             # download M4-Monthly (once) and cache the sample
 make run                              # = python -m ts_forecasting.benchmark
+python -m ts_forecasting.benchmark --models snaive,naive --horizon 18 --windows 3 --max-series 500
 ```
-> `make run` starts working at **M2**, once `src/ts_forecasting/benchmark.py` is added.
-> Results are written to `results/` (git-ignored).
-
-Planned CLI options: `--dataset m4-monthly --horizon 18 --windows 3 --models snaive,ets,arima,prophet,lgbm`.
+Results are written to `results/<dataset>/` (git-ignored): `scores.csv` (one row per model,
+series and window), `leaderboard.csv` and `leaderboard.md`.
 
 ### Lint and test
 ```bash
@@ -107,8 +107,23 @@ make format   # auto-fix lint and formatting
   runtime per series.
 - **Method:** rolling-origin CV with the same cutoffs for all models, plus pairwise
   Diebold-Mariano tests against the baseline.
-- **Results:** *targets until measured*: a reproducible leaderboard and documented cases
-  where simple baselines win.
+- **Data:** 500 M4-Monthly series sampled with seed 42 from those with at least 90 points
+  (3 windows × 18 + 3 years of history). Official M4 train and test are joined, so the last
+  window is the official M4 test period. M4 start dates are unreliable, so each series gets a
+  synthetic monthly index.
+
+### Measured baselines (M1)
+
+h = 18, 3 rolling-origin windows, 500 series (1,500 series-windows). Means over series-windows.
+
+| Model | MASE | rel. MASE | sMAPE | 80% cov. | 95% cov. | ms / series |
+|---|---|---|---|---|---|---|
+| Naive (last value) | 1.235 | 0.931 | 11.36 | 0.847 | 0.932 | 0.34 |
+| Seasonal naive (baseline) | 1.326 | 1.000 | 12.14 | 0.782 | 0.915 | 0.40 |
+
+A first "simple baseline" finding: on this sample, plain naive beats seasonal naive by 7% MASE,
+because many M4 monthly series are trend-dominated with weak seasonality. Measured 2026-10-19 on
+a laptop CPU. Results for the other models are *targets until measured*.
 
 ## Milestones
 
@@ -117,11 +132,11 @@ Milestones follow [SHARED_STANDARDS.md](../SHARED_STANDARDS.md). Each one has a 
 ### M1: Scaffold & baseline
 - [x] Repo scaffold: `pyproject.toml`, Makefile, `.gitignore`, `.env.example`
 - [x] Smoke test passes (`make test`)
-- [ ] Baseline: seasonal naive forecast + MASE on one dataset
+- [x] Baseline: seasonal naive forecast + MASE on one dataset
 
 ### M2: Core functionality
 - [ ] Common model interface; ETS, ARIMA/SARIMA, statsforecast Auto*, Prophet, LightGBM wrappers
-- [ ] Rolling-origin backtester
+- [x] Rolling-origin backtester
 - [ ] `python -m ts_forecasting.benchmark` CLI
 
 ### M3: Data / storage layer
@@ -149,8 +164,14 @@ Milestones follow [SHARED_STANDARDS.md](../SHARED_STANDARDS.md). Each one has a 
 ## Project Layout
 ```
 04-time-series-forecasting/
-├── src/ts_forecasting/__init__.py
-├── tests/test_smoke.py
+├── src/ts_forecasting/
+│   ├── config.py        # pydantic-settings (reads .env)
+│   ├── data.py          # M4 loader, sampling, parquet cache (long format)
+│   ├── models.py        # common forecast interface + models
+│   ├── backtest.py      # rolling-origin CV + leaderboard
+│   ├── metrics.py       # MASE, sMAPE, RMSE, interval coverage
+│   └── benchmark.py     # CLI
+├── tests/
 ├── .env.example
 ├── .gitignore
 ├── Makefile

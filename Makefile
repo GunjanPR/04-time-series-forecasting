@@ -1,7 +1,7 @@
 # Windows: install make with `choco install make`, or run from Git Bash.
 PYTHON ?= python
 
-.PHONY: install lint format test run
+.PHONY: install lint format test data run
 
 install:
 	$(PYTHON) -m pip install --upgrade pip
@@ -17,6 +17,9 @@ format:
 
 test:
 	$(PYTHON) -m pytest
+
+data:
+	$(PYTHON) -m ts_forecasting.data
 
 run:
 	$(PYTHON) -m ts_forecasting.benchmark
