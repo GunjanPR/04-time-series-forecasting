@@ -23,7 +23,14 @@ interval scoring, runtime cost and significance tests.
   47% of series with no seasonality, but on only 23% of strongly seasonal series and 22% of
   strongly trending ones.
 
-<!-- electricity-headline -->
+**Second dataset (UCI electricity, 342 clients × 3 windows, daily, h = 14)**
+
+* **The ranking flips on long, homogeneous series.** The global LightGBM is the most accurate
+  method. It improved MASE by 3.0% against seasonal naive (0.980 vs 1.010) and was the only
+  model besides Comb to beat it significantly (Holm p = 1e-6).
+* **Seasonal naive is hard to beat here.** AutoARIMA, AutoTheta and Naive2 are no better, or
+  worse. The lesson from M4 that statistical models clearly win does not transfer to a
+  daily load series with a strong weekly cycle.
 
 ## Overview
 
@@ -256,7 +263,54 @@ statistical models earn their keep on strongly seasonal and strongly trending se
 where Naive2 wins only about 1 in 4.
 ([plot](docs/results/m4-monthly/baseline_wins_naive2_vs_comb.png))
 
-<!-- electricity-results -->
+### UCI electricity: 342 clients, daily, h = 14, 3 windows (1,026 series-windows per model)
+
+Data: [ElectricityLoadDiagrams20112014](https://archive.ics.uci.edu/dataset/321) (CC BY 4.0),
+15-minute kW readings for 370 Portuguese clients, summed to daily kWh. Leading zeros
+(clients that joined late) are trimmed. 28 clients are dropped because they have metering
+gaps (more than 1% zero days) or less than 407 days of history, leaving 342 series of
+455-1,461 days. The season is 7 (weekly);
+Prophet also gets yearly seasonality.
+
+| Model | MASE | vs seasonal naive | Median MASE | 80% cov. | 95% cov. | MSIS (95%) | ms / series, 12 workers |
+|---|---|---|---|---|---|---|---|
+| **LightGBM (global model)** | **0.980** | **−3.0%** | **0.810** | 76.0% | 90.0% | 11.64 | 79 |
+| Comb (ETS+ARIMA+Theta) | 0.990 | −2.0% | 0.814 | 88.5% | 94.9% | **10.93** | 2,267 |
+| AutoETS | 1.000 | −1.1% | 0.820 | 89.2% | 95.5% | 10.99 | 163 |
+| SARIMA airline | 1.010 | 0.0% | 0.841 | 90.0% | 95.8% | 11.26 | 96 |
+| **Seasonal naive (baseline)** | 1.010 | - | 0.859 | 89.5% | 95.6% | 11.15 | 0.6 |
+| AutoARIMA | 1.016 | +0.5% | 0.839 | 85.2% | 93.4% | 11.15 | 1,912 |
+| AutoTheta | 1.024 | +1.3% | 0.829 | 87.7% | 94.4% | 11.46 | 192 |
+| Naive2 | 1.055 | +4.5% | 0.870 | 94.7% | 97.9% | 13.12 | 1.2 |
+| Naive | 1.260 | +24.7% | 1.013 | 95.5% | 98.3% | 15.34 | 0.5 |
+| Prophet | 1.282 | +26.9% | 1.095 | 70.7% | 86.5% | 12.25 | 80 |
+
+Against seasonal naive ([full report](docs/results/electricity-daily/report.md)):
+
+* LightGBM: −0.031 MASE (CI −0.048 to −0.013), wins on 64% of clients, Holm p = 1e-6.
+* Comb: −0.021 (CI −0.037 to −0.003), wins on 62%, Holm p = 5e-4.
+* AutoETS (Holm p = 0.05), SARIMA, AutoARIMA and AutoTheta are not significantly different
+  from the baseline.
+* Friedman p = 4e-80. With a Nemenyi CD of 0.73, Comb (mean rank 4.21) and LightGBM (4.51)
+  are tied at the top.
+
+**Reading the two datasets together**
+
+| | M4-Monthly | Electricity (daily) |
+|---|---|---|
+| Series | 500 heterogeneous series of 91-936 months (median 275) | 342 related load profiles of 455-1,461 days (median 1,096) |
+| Best method | Comb (−28.0% vs seasonal naive) | LightGBM (−3.0%) |
+| LightGBM rank | 7th of 10, heavy-tailed errors | 1st |
+| Seasonal naive | 9th of 10 | Middle of the pack, tied with SARIMA |
+| Prophet | Last | Last |
+
+A global gradient-boosted model needs many long, related series to learn from; with them it
+wins, and without them the classical per-series models win. The only constants are that a
+combination of statistical models is always near the top, and Prophet is always last.
+
+The LightGBM intervals, calibrated on the last 14 days of each history, under-cover on this
+data (90.0% at 95%), because the calibration window is shorter than the yearly cycle. The
+statistical models stay close to nominal coverage.
 
 ## Milestones
 
