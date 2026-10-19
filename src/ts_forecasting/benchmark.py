@@ -17,7 +17,7 @@ import pandas as pd
 
 from ts_forecasting.backtest import attribute_combination_cost, leaderboard, run_backtest
 from ts_forecasting.config import Settings, get_settings
-from ts_forecasting.data import DATASETS, load, resolve
+from ts_forecasting.data import DATASETS, calibration_origins, load, resolve
 from ts_forecasting.models import MODEL_NAMES, build
 
 log = logging.getLogger(__name__)
@@ -59,7 +59,12 @@ def benchmark(
             log.info("%s: reusing %s", name, path)
             frames.append(pd.read_csv(path))
             continue
-        model = build(name, n_jobs=settings.n_jobs, seed=settings.random_seed)
+        model = build(
+            name,
+            n_jobs=settings.n_jobs,
+            seed=settings.random_seed,
+            calibration_origins=calibration_origins(DATASETS[settings.dataset], settings.horizon),
+        )
         scores, forecasts = run_backtest(df, model, settings.horizon, settings.n_windows, season)
         fc_path.parent.mkdir(parents=True, exist_ok=True)
         forecasts.to_parquet(fc_path, index=False)

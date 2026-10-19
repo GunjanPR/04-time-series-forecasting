@@ -28,6 +28,10 @@ interval scoring, runtime cost and significance tests.
 * **The ranking flips on long, homogeneous series.** The global LightGBM is the most accurate
   method. It improved MASE by 3.0% against seasonal naive (0.980 vs 1.010) and was the only
   model besides Comb to beat it significantly (Holm p = 1e-6).
+* **Optimization 2:** calibrating LightGBM's intervals over a year of forecast origins
+  instead of the last 14 days fixed their under-coverage (95% intervals: 90.0% → 94.0%;
+  80%: 76.0% → 80.5%). It also cut MSIS by 6.6% (11.64 → 10.87), the best interval score of
+  any method on this dataset.
 * **Seasonal naive is hard to beat here.** AutoARIMA, AutoTheta and Naive2 are no better, or
   worse. The lesson from M4 that statistical models clearly win does not transfer to a
   daily load series with a strong weekly cycle.
@@ -58,7 +62,7 @@ strength, history length and volatility.
 | `comb` | Equal-weight mean of ETS, ARIMA and Theta (the M4 "Comb" idea) | - |
 | `sarima` | Fixed SARIMA(0,1,1)(0,1,1)m, the "airline" model | statsmodels |
 | `prophet` | Additive trend + seasonality | prophet |
-| `lgbm` | One global LightGBM across all series: lags, rolling means, calendar position; recursive; split-conformal intervals | lightgbm |
+| `lgbm` | One global LightGBM across all series: lags, rolling means, calendar position; recursive; split-conformal intervals calibrated over about one year of origins | lightgbm |
 
 ## Tech Stack
 
@@ -165,7 +169,8 @@ docker compose up --build         # runs the M4 benchmark, then serves the dashb
 ### Lint and test
 ```bash
 make lint     # ruff check + ruff format --check
-make test     # pytest: 61 tests (no network; one dashboard test needs streamlit)
+make test     # pytest: 65 tests (no network; one dashboard test needs streamlit)
+make coverage # the same with line coverage (fails below 70%)
 make format   # auto-fix lint and formatting
 ```
 
@@ -281,8 +286,8 @@ Prophet also gets yearly seasonality.
 
 | Model | MASE | vs seasonal naive | Median MASE | 80% cov. | 95% cov. | MSIS (95%) | ms / series, 12 workers |
 |---|---|---|---|---|---|---|---|
-| **LightGBM (global model)** | **0.980** | **−3.0%** | **0.810** | 76.0% | 90.0% | 11.64 | 79 |
-| Comb (ETS+ARIMA+Theta) | 0.990 | −2.0% | 0.814 | 88.5% | 94.9% | **10.93** | 2,267 |
+| **LightGBM (global model)** | **0.980** | **−3.0%** | **0.810** | 80.5% | 94.0% | **10.87** | 74 |
+| Comb (ETS+ARIMA+Theta) | 0.990 | −2.0% | 0.814 | 88.5% | 94.9% | 10.93 | 2,267 |
 | AutoETS | 1.000 | −1.1% | 0.820 | 89.2% | 95.5% | 10.99 | 163 |
 | SARIMA airline | 1.010 | 0.0% | 0.841 | 90.0% | 95.8% | 11.26 | 96 |
 | **Seasonal naive (baseline)** | 1.010 | - | 0.859 | 89.5% | 95.6% | 11.15 | 0.6 |
@@ -315,9 +320,39 @@ A global gradient-boosted model needs many long, related series to learn from; w
 wins, and without them the classical per-series models win. The only constants are that a
 combination of statistical models is always near the top, and Prophet is always last.
 
-The LightGBM intervals, calibrated on the last 14 days of each history, under-cover on this
-data (90.0% at 95%), because the calibration window is shorter than the yearly cycle. The
-statistical models stay close to nominal coverage.
+### Optimization 2: calibrating LightGBM intervals over a year
+
+The conformal intervals were first calibrated on one forecast origin: the last h points of
+every history. On daily electricity that is the last 14 days. That window misses the
+yearly cycle, so the intervals were too narrow, covering 90.0% at a nominal 95%. With
+`calibration_origins = K`, one model fitted with the last K·h points held out forecasts from
+K origins, and all their errors feed the conformal quantiles. The benchmark sets K to the
+number of horizons in one year (`periods_per_year // h`). That is 26 for daily electricity
+(h = 14) and 1 for M4 monthly (h = 18), where a single 18-month window already spans a
+year. Point forecasts do not change.
+
+Sweep on the laptop (i5-13420H, AC power; 342 series × 3 windows for electricity, 500 × 3
+for M4):
+
+| Electricity: origins K | 80% coverage | 95% coverage | MSIS (95%) |
+|---|---|---|---|
+| 1 (before) | 76.0% | 90.0% | 11.64 |
+| 2 | 76.4% | 91.0% | 11.44 |
+| 4 | 79.0% | 92.1% | 11.37 |
+| 8 | 78.6% | 92.2% | 11.25 |
+| 13 | 81.8% | 93.9% | 11.13 |
+| **26 (now: one year)** | **80.5%** | **94.0%** | **10.87** |
+
+| M4 monthly: origins K | 80% coverage | 95% coverage | MSIS (95%) |
+|---|---|---|---|
+| **1 (now: 18 months ≥ one year)** | **80.4%** | **94.7%** | **10.97** |
+| 2 | 81.3% | 95.3% | 10.94 |
+| 3 | 83.0% | 95.9% | 11.02 |
+| 6 | 84.7% | 96.5% | 11.03 |
+
+On M4 more origins over-cover, which is why the rule gives K = 1 there. On electricity,
+LightGBM now has the best interval score of any method (10.87 vs 10.93 for Comb). Its 95%
+coverage is still 1 point under nominal. Runtime is unchanged (74 ms per series).
 
 ## Milestones
 
@@ -369,7 +404,7 @@ Milestones follow [SHARED_STANDARDS.md](../SHARED_STANDARDS.md). Each one has a 
 │   ├── report.py        # report.md + plots
 │   ├── analysis.py      # where simple baselines win
 │   └── dashboard.py     # Streamlit app
-├── tests/               # 61 tests
+├── tests/               # 65 tests
 ├── docs/results/        # published results per dataset (committed)
 ├── .github/workflows/ci.yml
 ├── Dockerfile, docker-compose.yml, Makefile, pyproject.toml

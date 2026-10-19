@@ -27,10 +27,16 @@ github.com/GunjanPR/04-time-series-forecasting
    (−3.0% MASE vs seasonal naive, Holm p = 1e-6), while three of the statistical models
    were no better than the baseline. *(docs/results/electricity-daily/report.md)*
 
-5. Built the benchmark as reusable infrastructure: 10 forecasters behind one interface,
+5. Fixed under-covering LightGBM prediction intervals on daily load data (95% intervals
+   covered 90.0%) by calibrating split-conformal errors over a year of forecast origins
+   instead of the last 14 days: coverage 90.0% → 94.0%, MSIS −6.6% (11.64 → 10.87), the
+   best interval score of 10 methods, with point forecasts and runtime unchanged.
+   *(README, "Optimization 2")*
+
+6. Built the benchmark as reusable infrastructure: 10 forecasters behind one interface,
    resumable runs, MSIS and OWA metrics, a "where baselines win" analysis by STL
    trend/seasonal strength, a Streamlit dashboard, Docker, and CI that runs a real
-   M4 smoke benchmark on every push (61 tests).
+   M4 smoke benchmark on every push (65 tests, coverage floor).
 
 **Short version (one line):** Benchmarked 10 forecasting methods on 2 public datasets with
 rolling-origin CV and significance tests. The best method changed with the data (a
