@@ -283,13 +283,20 @@ class LightGBMGlobal:
     values, and month of year; training rows start one season into each series.
 
     Prediction intervals are split-conformal per horizon step: the model is first fitted with
-    the last `h` points of every series held out, the absolute scaled errors on those points
-    give a quantile per step, and the final model is refitted on all the data.
+    the last `h` points of every series held out, and the errors on those points give a
+    quantile per step; the final model is then refitted on all the data. With
+    `intervals="adaptive"` (default) each error is first divided by its series' in-sample
+    seasonal-naive MAE, so interval width follows each series' volatility; `"global"` uses one
+    error distribution for every series.
     """
 
     name = "lgbm"
 
-    def __init__(self, seed: int = 42, n_jobs: int = -1, **params):
+    def __init__(self, seed: int = 42, n_jobs: int = -1, intervals: str = "adaptive", **params):
+        if intervals not in ("adaptive", "global"):
+            raise ValueError(f"intervals must be 'adaptive' or 'global', not {intervals!r}")
+        self.intervals = intervals
+        self.name = "lgbm" if intervals == "adaptive" else "lgbm_global"
         self.params = {
             "n_estimators": 500,
             "learning_rate": 0.03,
@@ -363,26 +370,43 @@ class LightGBMGlobal:
                 histories[u].append(p)
         return {u: (np.array(preds[u]), scales[u]) for u in uids}
 
+    def _spreads(self, train: pd.DataFrame, fitted: dict, season: int) -> dict:
+        """Per-series error unit for the conformal step. `global`: 1 for every series (one
+        error distribution for all). `adaptive`: the series' in-sample seasonal-naive MAE on
+        the scaled level, so volatile series get wider intervals and calm ones narrower."""
+        if self.intervals == "global":
+            return dict.fromkeys(fitted, 1.0)
+        spreads = {}
+        for uid, g in train.groupby("unique_id", sort=False):
+            y = g["y"].to_numpy(float) / fitted[uid][1]
+            lag = season if len(y) > season else 1
+            mae = np.mean(np.abs(y[lag:] - y[:-lag]))
+            spreads[uid] = mae if mae > 0 else 1.0
+        return spreads
+
     def forecast(self, train, h, season, levels=(80, 95)):
         train = train.sort_values(["unique_id", "ds"])
         position = train.groupby("unique_id", sort=False).cumcount(ascending=False)
         calib_train, calib_test = train[position >= h], train[position < h]
         calib = self._predict(self._fit(calib_train, season), calib_train, h, season)
+        calib_spread = self._spreads(calib_train, calib, season)
         errors = np.array(
             [
-                np.abs(g["y"].to_numpy(float) / calib[uid][1] - calib[uid][0])
+                np.abs(g["y"].to_numpy(float) / calib[uid][1] - calib[uid][0]) / calib_spread[uid]
                 for uid, g in calib_test.groupby("unique_id", sort=False)
             ]
-        )  # (n_series, h), scaled units
+        )  # (n_series, h), in units of each series' spread
         quantiles = {level: np.quantile(errors, level / 100, axis=0) for level in levels}
 
         final = self._predict(self._fit(train, season), train, h, season)
+        spread = self._spreads(train, final, season)
         frames = []
         for uid, (scaled, scale) in final.items():
             out = {"unique_id": uid, "step": np.arange(1, h + 1), "mean": scaled * scale}
             for level in levels:
-                out[f"lo-{level}"] = (scaled - quantiles[level]) * scale
-                out[f"hi-{level}"] = (scaled + quantiles[level]) * scale
+                half_width = quantiles[level] * spread[uid]
+                out[f"lo-{level}"] = (scaled - half_width) * scale
+                out[f"hi-{level}"] = (scaled + half_width) * scale
             frames.append(pd.DataFrame(out))
         return pd.concat(frames, ignore_index=True)
 
@@ -417,6 +441,8 @@ def build(name: str, n_jobs: int = -1, seed: int = 42) -> Forecaster:
         "sarima": lambda: Sarima(n_jobs),
         "prophet": lambda: ProphetModel(n_jobs),
         "lgbm": lambda: LightGBMGlobal(seed=seed, n_jobs=n_jobs),
+        # ablation: one conformal error distribution for all series (not in MODEL_NAMES)
+        "lgbm_global": lambda: LightGBMGlobal(seed=seed, n_jobs=n_jobs, intervals="global"),
     }
     return factories[name]()
 

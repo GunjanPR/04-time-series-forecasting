@@ -95,3 +95,25 @@ def test_lgbm_conformal_interval_widths_are_per_step_and_positive(frame):
     fc = build("lgbm", n_jobs=1).forecast(frame, H, SEASON, LEVELS)
     width = (fc["hi-95"] - fc["lo-95"]).to_numpy()
     assert (width > 0).all()
+
+
+def test_adaptive_intervals_follow_series_volatility():
+    rng = np.random.default_rng(3)
+    t = np.arange(72)
+    frames = []
+    for i in range(20):
+        noise = 1.0 if i % 2 == 0 else 15.0  # calm and volatile series, same level
+        y = 200 + 20 * np.sin(2 * np.pi * t / 12) + rng.normal(0, noise, 72)
+        frames.append(pd.DataFrame({"unique_id": f"S{i}",
+                                    "ds": pd.date_range("2010-01-01", periods=72, freq="MS"),
+                                    "y": y}))  # fmt: skip
+    df = pd.concat(frames, ignore_index=True)
+    width = {}
+    for name in ("lgbm", "lgbm_global"):
+        fc = build(name, n_jobs=1).forecast(df, 6, 12, (95,))
+        fc["width"] = fc["hi-95"] - fc["lo-95"]
+        calm = fc[fc["unique_id"].str[1:].astype(int) % 2 == 0]["width"].mean()
+        volatile = fc[fc["unique_id"].str[1:].astype(int) % 2 == 1]["width"].mean()
+        width[name] = volatile / calm
+    assert width["lgbm"] > 3 * width["lgbm_global"]
+    assert build("lgbm_global").name == "lgbm_global"

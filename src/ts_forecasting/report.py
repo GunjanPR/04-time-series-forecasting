@@ -43,7 +43,8 @@ LABELS = {
     "comb": "Comb (ETS+ARIMA+Theta)",
     "sarima": "SARIMA airline",
     "prophet": "Prophet",
-    "lgbm": "LightGBM global",
+    "lgbm": "LightGBM (global model)",
+    "lgbm_global": "LightGBM, pooled intervals (ablation)",
 }
 
 
