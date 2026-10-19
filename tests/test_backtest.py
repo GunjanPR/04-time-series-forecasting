@@ -1,9 +1,10 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from conftest import seasonal_frame
 from ts_forecasting.backtest import leaderboard, rolling_origin_splits, run_backtest
-from ts_forecasting.models import MODELS, Naive, SeasonalNaive
+from ts_forecasting.models import MODEL_NAMES, Naive, SeasonalNaive, build
 
 
 def test_splits_never_leak_future_into_train():
@@ -35,12 +36,25 @@ def test_seasonal_naive_repeats_last_season():
 
 def test_seasonal_naive_beats_naive_on_seasonal_data():
     df = seasonal_frame()
-    scores = [run_backtest(df, m(), h=12, n_windows=2, season=12) for m in (SeasonalNaive, Naive)]
-    board = leaderboard(pd.concat(scores))
+    results = [run_backtest(df, m(), h=12, n_windows=2, season=12) for m in (SeasonalNaive, Naive)]
+    board = leaderboard(pd.concat([scores for scores, _ in results]))
     assert board.index[0] == "snaive"
     assert board.loc["naive", "rel_mase"] > 1
     assert board.loc["snaive", "coverage_95"] > 0.8
 
 
-def test_registry_names_match():
-    assert set(MODELS) == {"snaive", "naive"}
+def test_every_registered_model_builds():
+    for name in MODEL_NAMES:
+        assert build(name, n_jobs=1).name == name
+
+
+def test_forecast_paths_line_up_with_scores():
+    df = seasonal_frame()
+    scores, forecasts = run_backtest(df, SeasonalNaive(), h=6, n_windows=2, season=12)
+    assert len(forecasts) == len(scores) * 6
+    first = scores.iloc[0]
+    path = forecasts[
+        (forecasts["unique_id"] == first["unique_id"]) & (forecasts["window"] == first["window"])
+    ]
+    recomputed = np.mean(np.abs(path["y"] - path["mean"])) / path["scale"].iloc[0]
+    assert recomputed == pytest.approx(first["mase"])

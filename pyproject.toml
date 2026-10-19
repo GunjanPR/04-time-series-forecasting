@@ -17,10 +17,12 @@ dependencies = [
     "statsforecast>=1.7",
     "prophet>=1.1.5",
     "lightgbm>=4.3",
+    "scikit-learn>=1.5",
     "matplotlib>=3.8",
     "pyarrow>=16.0",
     "pydantic-settings>=2.3",
     "tabulate>=0.9",
+    "joblib>=1.4",
 ]
 
 [project.optional-dependencies]

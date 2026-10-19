@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from ts_forecasting.metrics import coverage, mase, rmse, smape
+from ts_forecasting.metrics import coverage, mase, msis, rmse, smape
 
 
 def test_perfect_forecast_scores_zero():
@@ -28,3 +28,11 @@ def test_smape_bounds_and_zero_denominator():
 def test_coverage():
     y = np.array([1.0, 5.0, 10.0, 20.0])
     assert coverage(y, np.full(4, 0.0), np.full(4, 10.0)) == 0.75
+
+
+def test_msis_is_width_when_covered_and_penalises_misses():
+    y = np.array([5.0, 5.0])
+    assert msis(y, np.full(2, 4.0), np.full(2, 6.0), scale=1.0, level=95) == pytest.approx(2)
+    # one miss by 1 unit at alpha = 0.05 adds 2 / 0.05 = 40, averaged over 2 points
+    missed = msis(np.array([5.0, 7.0]), np.full(2, 4.0), np.full(2, 6.0), scale=1.0, level=95)
+    assert missed == pytest.approx(2 + 20)
