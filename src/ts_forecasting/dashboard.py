@@ -3,8 +3,8 @@
     streamlit run src/ts_forecasting/dashboard.py          # or: make dashboard
 
 Shows the published results in `docs/results/<dataset>/` (committed, so the dashboard works
-on a fresh clone) and, when a local benchmark run exists under `results/`, an interactive explorer of
-every series' backtest forecasts and intervals.
+on a fresh clone) and, when a local benchmark run exists under `results/`, an interactive
+explorer of every series' backtest forecasts and intervals.
 """
 
 from __future__ import annotations
