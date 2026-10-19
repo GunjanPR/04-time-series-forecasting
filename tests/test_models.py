@@ -141,9 +141,9 @@ def test_origins_without_a_season_of_history_are_skipped():
 
 
 def test_calibration_origins_is_validated_and_named():
-    assert LightGBMGlobal(calibration_origins=4).name == "lgbm_cal4"
-    assert LightGBMGlobal().name == "lgbm"
+    assert build("lgbm_cal4").name == "lgbm_cal4"
     assert build("lgbm_cal8").calibration_origins == 8
+    assert build("lgbm", calibration_origins=26).name == "lgbm"  # benchmark name is stable
     with pytest.raises(ValueError):
         LightGBMGlobal(calibration_origins=0)
 
@@ -177,3 +177,10 @@ def test_every_model_runs_on_daily_data(name):
     fc = build(name, n_jobs=1).forecast(df, 14, 7, LEVELS)
     assert len(fc) == 8 * 14
     assert np.isfinite(fc["mean"]).all()
+
+
+def test_calibration_spans_about_one_year_per_dataset():
+    from ts_forecasting.data import DATASETS, calibration_origins
+
+    assert calibration_origins(DATASETS["m4-monthly"], 18) == 1  # one origin already > a year
+    assert calibration_origins(DATASETS["electricity-daily"], 14) == 26

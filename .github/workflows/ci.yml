@@ -16,7 +16,7 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev,dashboard]"
       - run: make lint
-      - run: make test
+      - run: make coverage
 
   benchmark-smoke:
     # A small real run on M4 data: every model, 30 series, 1 window. Fails on any error and

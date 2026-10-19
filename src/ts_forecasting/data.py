@@ -43,11 +43,18 @@ class DatasetSpec:
     n_windows: int  # default number of rolling-origin windows
     min_train: int  # shortest history allowed in the first backtest window
     unit: str  # one period, for labels
+    year: int  # periods per year: LightGBM calibrates its intervals across about one year
+
+
+def calibration_origins(spec: DatasetSpec, horizon: int) -> int:
+    """Forecast origins whose h-step errors calibrate the LightGBM intervals: as many as fit in
+    one year, so the calibration errors cover the yearly cycle (at least 1)."""
+    return max(1, spec.year // horizon)
 
 
 DATASETS = {
-    "m4-monthly": DatasetSpec("MS", 12, 18, 3, min_train=36, unit="month"),
-    "electricity-daily": DatasetSpec("D", 7, 14, 3, min_train=365, unit="day"),
+    "m4-monthly": DatasetSpec("MS", 12, 18, 3, min_train=36, unit="month", year=12),
+    "electricity-daily": DatasetSpec("D", 7, 14, 3, min_train=365, unit="day", year=365),
 }
 SEASON_LENGTH = {name: spec.season for name, spec in DATASETS.items()}
 

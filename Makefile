@@ -1,7 +1,7 @@
 # Windows: install make with `choco install make`, or run from Git Bash.
 PYTHON ?= python
 
-.PHONY: install lint format test data run run-electricity report dashboard up down
+.PHONY: install lint format test coverage data run run-electricity report dashboard up down
 
 install:
 	$(PYTHON) -m pip install --upgrade pip
@@ -17,6 +17,9 @@ format:
 
 test:
 	$(PYTHON) -m pytest
+
+coverage:                   # tests with line coverage; fails below 70%
+	$(PYTHON) -m pytest --cov=ts_forecasting --cov-report=term-missing:skip-covered --cov-fail-under=70
 
 data:
 	$(PYTHON) -m ts_forecasting.data

@@ -332,8 +332,6 @@ class LightGBMGlobal:
         self.intervals = intervals
         self.calibration_origins = calibration_origins
         self.name = "lgbm" if intervals == "adaptive" else "lgbm_global"
-        if calibration_origins > 1:
-            self.name += f"_cal{calibration_origins}"
         self.params = {
             "n_estimators": 500,
             "learning_rate": 0.03,
@@ -480,8 +478,9 @@ class Combination:
         return (sum(frames) / len(frames)).reset_index()
 
 
-def build(name: str, n_jobs: int = -1, seed: int = 42) -> Forecaster:
-    """Instantiate a model by name."""
+def build(name: str, n_jobs: int = -1, seed: int = 42, calibration_origins: int = 1) -> Forecaster:
+    """Instantiate a model by name. `calibration_origins` applies to `lgbm` (see LightGBMGlobal);
+    the benchmark sets it per dataset."""
     if name in ("ets", "arima", "theta"):
         return StatsForecastModel(name, n_jobs)
     if name == "comb":
@@ -494,14 +493,17 @@ def build(name: str, n_jobs: int = -1, seed: int = 42) -> Forecaster:
         "naive2": Naive2,
         "sarima": lambda: Sarima(n_jobs),
         "prophet": lambda: ProphetModel(n_jobs),
-        "lgbm": lambda: LightGBMGlobal(seed=seed, n_jobs=n_jobs),
+        "lgbm": lambda: LightGBMGlobal(
+            seed=seed, n_jobs=n_jobs, calibration_origins=calibration_origins
+        ),
         # ablation: one conformal error distribution for all series (not in MODEL_NAMES)
         "lgbm_global": lambda: LightGBMGlobal(seed=seed, n_jobs=n_jobs, intervals="global"),
     }
     if name.startswith("lgbm_cal") and name[len("lgbm_cal") :].isdigit():
         # ablation: conformal errors from k origins (e.g. lgbm_cal4; not in MODEL_NAMES)
-        k = int(name[len("lgbm_cal") :])
-        return LightGBMGlobal(seed=seed, n_jobs=n_jobs, calibration_origins=k)
+        model = LightGBMGlobal(seed=seed, n_jobs=n_jobs, calibration_origins=int(name[8:]))
+        model.name = name
+        return model
     return factories[name]()
 
 
