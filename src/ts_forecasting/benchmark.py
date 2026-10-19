@@ -69,7 +69,30 @@ def benchmark(
     board.to_csv(out / "leaderboard.csv")
     (out / "leaderboard.md").write_text(board.to_markdown(floatfmt=".3f"))
     log.info("leaderboard -> %s\n%s", out, board.to_string(float_format="%.3f"))
+    if settings.mlflow_tracking_uri:
+        log_to_mlflow(board, settings, out)
     return board
+
+
+def log_to_mlflow(board: pd.DataFrame, settings: Settings, out) -> None:
+    """One MLflow run per model (params = benchmark config, metrics = leaderboard row)."""
+    import mlflow
+
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    mlflow.set_experiment(f"forecasting-{settings.dataset}")
+    config = {
+        "dataset": settings.dataset,
+        "horizon": settings.horizon,
+        "n_windows": settings.n_windows,
+        "max_series": settings.max_series,
+        "seed": settings.random_seed,
+    }
+    for model, row in board.iterrows():
+        with mlflow.start_run(run_name=f"{model}-{out.name}"):
+            mlflow.log_params({"model": model, **config})
+            mlflow.log_metrics({k: float(v) for k, v in row.items() if pd.notna(v)})
+            mlflow.log_artifact(str(out / "scores" / f"{model}.csv"))
+    log.info("logged %d runs to MLflow at %s", len(board), settings.mlflow_tracking_uri)
 
 
 def main() -> None:

@@ -1,0 +1,29 @@
+# docker compose up             -> runs the benchmark, then serves the dashboard on :8501
+# docker compose run benchmark --models snaive,theta --max-series 50   (custom run)
+services:
+  benchmark:
+    build: .
+    command: ["python", "-m", "ts_forecasting.benchmark"]
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+
+  dashboard:
+    build: .
+    command: ["streamlit", "run", "src/ts_forecasting/dashboard.py",
+              "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+    ports: ["8501:8501"]
+    volumes:
+      - ./data:/app/data:ro
+      - ./results:/app/results:ro
+    depends_on:
+      benchmark:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5

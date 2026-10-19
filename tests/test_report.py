@@ -1,6 +1,7 @@
 """End to end: benchmark (on synthetic series) -> resume -> report."""
 
 import pandas as pd
+import pytest
 
 import ts_forecasting.benchmark as bench
 from conftest import seasonal_frame
@@ -34,3 +35,18 @@ def test_benchmark_resumes_and_report_is_built(tmp_path, monkeypatch):
     significance = pd.read_csv(publish / "significance.csv", index_col=0)
     assert "snaive" not in significance.index
     assert {"wilcoxon_p_holm", "dm_better_pct", "mean_rank"} <= set(significance.columns)
+
+
+def test_benchmark_logs_one_mlflow_run_per_model(tmp_path, monkeypatch):
+    mlflow = pytest.importorskip("mlflow")
+    monkeypatch.setattr(bench, "load", lambda settings: seasonal_frame(n_series=6, length=60))
+    uri = f"sqlite:///{(tmp_path / 'mlflow.db').as_posix()}"
+    settings = Settings(
+        results_dir=tmp_path / "results", horizon=6, n_windows=1, n_jobs=1,
+        mlflow_tracking_uri=uri, _env_file=None,
+    )  # fmt: skip
+    bench.benchmark(["snaive", "naive2"], settings)
+    mlflow.set_tracking_uri(uri)
+    runs = mlflow.search_runs(experiment_names=["forecasting-m4-monthly"])
+    assert sorted(runs["params.model"]) == ["naive2", "snaive"]
+    assert runs["metrics.mase"].notna().all()

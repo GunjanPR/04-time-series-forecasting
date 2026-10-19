@@ -23,9 +23,18 @@ dependencies = [
     "pydantic-settings>=2.3",
     "tabulate>=0.9",
     "joblib>=1.4",
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
+# Optional experiment logging: set MLFLOW_TRACKING_URI to enable
+tracking = [
+    "mlflow>=2.15",
+]
+# Streamlit results dashboard (make dashboard)
+dashboard = [
+    "streamlit>=1.38",
+]
 dev = [
     "ruff>=0.6",
     "pytest>=8.0",

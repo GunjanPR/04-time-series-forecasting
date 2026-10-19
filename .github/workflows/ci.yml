@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev,dashboard]"
+      - run: make lint
+      - run: make test
+
+  benchmark-smoke:
+    # A small real run on M4 data: every model, 30 series, 1 window. Fails on any error and
+    # on a broken ordering that would make the headline result untrustworthy.
+    runs-on: ubuntu-latest
+    needs: lint-test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: m4-monthly-raw-v1
+      - name: Benchmark smoke run
+        run: python -m ts_forecasting.benchmark --max-series 30 --windows 1
+        env:
+          N_JOBS: "2"
+      - name: Sanity-check the leaderboard
+        run: |
+          python - <<'PY'
+          import glob, pandas as pd
+          board = pd.read_csv(glob.glob("results/m4-monthly/*/leaderboard.csv")[0], index_col=0)
+          print(board.round(3).to_string())
+          assert len(board) == 10, board.index.tolist()
+          assert board.loc["comb", "mase"] < board.loc["snaive", "mase"]
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results
+          path: results/
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: lint-test
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t ts-forecasting:ci .
+      - name: Models import and run inside the image
+        run: |
+          docker run --rm ts-forecasting:ci python -c "
+          import numpy as np, pandas as pd
+          from ts_forecasting.models import MODEL_NAMES, build
+          t = np.arange(72)
+          df = pd.concat(pd.DataFrame({'unique_id': f'S{i}', 'ds': pd.date_range('2010-01-01', periods=72, freq='MS'),
+                         'y': 100 + 10 * np.sin(2 * np.pi * t / 12) + i}) for i in range(12))
+          for name in MODEL_NAMES:
+              fc = build(name, n_jobs=1).forecast(df, 6, 12, (80, 95))
+              assert len(fc) == 72, name
+          print('all models OK')
+          "
