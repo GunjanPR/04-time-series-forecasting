@@ -12,9 +12,14 @@ interval scoring, runtime cost and significance tests.
   seasonal naive** (0.955 vs 1.326) across 1,500 series-windows. It beat seasonal naive on 81%
   of series (Wilcoxon, Holm-corrected p = 3e-51), with well-calibrated 80% intervals (79.7%
   coverage).
-* **The cheap model is nearly as good.** AutoETS alone improved MASE by 25.4%, and the
-  Nemenyi test cannot separate it from the combination. It needs 150 ms per series on one
-  core, against 2.9 s for the combination: 5% of the compute.
+* **The cheap model is nearly as good, but not equal.** AutoETS alone improved MASE by
+  25.4% at 5% of the combination's compute (150 ms vs 2.9 s per series on one core). The
+  Nemenyi test could not separate the two on this sample, but on a second, independent
+  500-series sample it could (mean-rank gap 0.73 > 0.61), so "statistically tied" did not
+  replicate.
+* **The main conclusions replicate on a second sample** of 500 different series (seed 7, 10
+  shared): Comb is best again (−25.7% MASE vs seasonal naive), Prophet is last again with
+  61% coverage at 95%, and the 10-method ranking correlates at Spearman 0.92.
 * **Prophet was the worst method,** 9.7% *worse* than seasonal naive, and its nominal 95%
   intervals covered only 61% of outcomes.
 * **Optimization:** making LightGBM's conformal intervals scale with each series' volatility
@@ -232,8 +237,8 @@ critical difference is 0.61 mean ranks, so:
 
 **What the numbers say**
 
-* **Model choice is a cost decision.** AutoETS is statistically tied with the best method at
-  5% of its compute. AutoTheta is within 4% of the best MASE at 1% of the compute, though
+* **Model choice is a cost decision.** AutoETS is within 3.7% of the best MASE at 5% of its
+  compute (statistically tied on this sample, but not on the second one below). AutoTheta is within 4% of the best MASE at 1% of the compute, though
   its intervals are too narrow (87% coverage at 95%).
 * **LightGBM wins often but loses big.** It beats seasonal naive on 81.6% of series, more
   than any other model, but a heavy tail of bad recursive forecasts leaves its mean MASE
@@ -243,6 +248,42 @@ critical difference is 0.61 mean ranks, so:
   intervals cover far less than they claim.
 * **Error grows with the horizon for every model,** with a visible step after one full
   season, at month 13 ([plot](docs/results/m4-monthly/mase_by_step.png)).
+
+### Robustness: a second, independent sample of 500 series
+
+Every number above comes from one random sample (seed 42) of the M4 monthly series with at
+least 90 observations. To check that the conclusions are not an accident of that draw, the
+whole benchmark was re-run on a second sample (seed 7; only 10 of its 500 series are in the
+first). Same 10 methods, horizon, windows and code; run on the laptop on 2026-10-19
+([report](docs/results/m4-monthly-seed7/report.md), reproduce with the commands in
+[scripts/compare_samples.py](scripts/compare_samples.py),
+[side by side](docs/results/m4-monthly-seed7/sample_comparison.csv)).
+
+| Model | MASE, seed 42 | MASE, seed 7 | vs seasonal naive, 42 / 7 | 95% coverage, 42 / 7 | Rank, 42 / 7 |
+|---|---|---|---|---|---|
+| Comb (ETS+ARIMA+Theta) | 0.955 | 0.959 | −28.0% / −25.7% | 91.6% / 92.0% | 1 / 1 |
+| AutoETS | 0.990 | 1.006 | −25.4% / −22.1% | 90.9% / 90.8% | 2 / 4 |
+| SARIMA airline | 0.990 | 0.991 | −25.3% / −23.2% | 91.3% / 91.2% | 3 / 3 |
+| AutoTheta | 0.992 | 1.019 | −25.2% / −21.0% | 87.2% / 86.6% | 4 / 5 |
+| AutoARIMA | 0.998 | 0.987 | −24.7% / −23.5% | 89.6% / 90.6% | 5 / 2 |
+| Naive2 | 1.063 | 1.091 | −19.9% / −15.4% | 91.4% / 91.5% | 6 / 6 |
+| LightGBM (global) | 1.107 | 1.107 | −16.5% / −14.2% | 94.7% / 95.2% | 7 / 7 |
+| Naive | 1.235 | 1.280 | −6.9% / −0.8% | 93.2% / 93.3% | 8 / 8 |
+| Seasonal naive | 1.326 | 1.290 | - | 91.5% / 92.2% | 9 / 9 |
+| Prophet | 1.454 | 1.454 | +9.7% / +12.6% | 61.4% / 61.2% | 10 / 10 |
+
+* **What holds:** Comb is the most accurate method on both samples, and Prophet the least,
+  with the same badly under-covering intervals. The top five are all statistical models,
+  LightGBM and the naive methods keep their places, and the MASE ranking of the 10 methods
+  correlates at Spearman 0.92 (p = 2e-4). The four single statistical models are again
+  within 0.3 mean ranks of each other.
+* **What does not:** the order inside the top five moves (AutoARIMA 5th → 2nd, AutoETS 2nd →
+  4th), and on the second sample Comb is significantly better than every other method,
+  AutoETS included (mean ranks 3.83 vs 4.57, Nemenyi CD 0.61). The single-sample claim that
+  AutoETS is statistically tied with the best method is therefore not robust; "within 4-5%
+  of the best at 5% of the compute" is.
+* The size of Comb's lead over seasonal naive depends on the draw (−28.0% vs −25.7%), so the
+  headline is better quoted as "about 26-28%".
 
 ### Optimization: LightGBM prediction intervals
 

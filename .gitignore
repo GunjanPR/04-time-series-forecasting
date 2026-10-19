@@ -43,6 +43,7 @@ desktop.ini
 # Project-specific: datasets, results, experiment logs
 /data/
 /results/
+/results_seed*/
 mlruns/
 *.parquet
 *.csv.gz
