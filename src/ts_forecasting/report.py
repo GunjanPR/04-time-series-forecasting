@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from ts_forecasting.backtest import leaderboard  # noqa: E402
+from ts_forecasting.backtest import attribute_combination_cost, leaderboard  # noqa: E402
 from ts_forecasting.config import Settings, get_settings  # noqa: E402
 from ts_forecasting.stats import (  # noqa: E402
     dm_summary,
@@ -48,7 +48,9 @@ LABELS = {
 
 
 def load_run(run_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    scores = pd.concat([pd.read_csv(p) for p in sorted((run_dir / "scores").glob("*.csv"))])
+    scores = attribute_combination_cost(
+        pd.concat([pd.read_csv(p) for p in sorted((run_dir / "scores").glob("*.csv"))])
+    )
     forecasts = pd.concat(
         [pd.read_parquet(p) for p in sorted((run_dir / "forecasts").glob("*.parquet"))]
     )

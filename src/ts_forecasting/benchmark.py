@@ -15,7 +15,7 @@ import logging
 
 import pandas as pd
 
-from ts_forecasting.backtest import leaderboard, run_backtest
+from ts_forecasting.backtest import attribute_combination_cost, leaderboard, run_backtest
 from ts_forecasting.config import Settings, get_settings
 from ts_forecasting.data import SEASON_LENGTH, load
 from ts_forecasting.models import MODEL_NAMES, build
@@ -63,7 +63,7 @@ def benchmark(
         forecasts.to_parquet(fc_path, index=False)
         scores.to_csv(path, index=False)
         frames.append(scores)
-    scores = pd.concat(frames, ignore_index=True)
+    scores = attribute_combination_cost(pd.concat(frames, ignore_index=True))
     board = leaderboard(scores)
     scores.to_csv(out / "scores.csv", index=False)
     board.to_csv(out / "leaderboard.csv")

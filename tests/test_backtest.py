@@ -3,7 +3,12 @@ import pandas as pd
 import pytest
 
 from conftest import seasonal_frame
-from ts_forecasting.backtest import leaderboard, rolling_origin_splits, run_backtest
+from ts_forecasting.backtest import (
+    attribute_combination_cost,
+    leaderboard,
+    rolling_origin_splits,
+    run_backtest,
+)
 from ts_forecasting.models import MODEL_NAMES, Naive, SeasonalNaive, build
 
 
@@ -58,3 +63,12 @@ def test_forecast_paths_line_up_with_scores():
     ]
     recomputed = np.mean(np.abs(path["y"] - path["mean"])) / path["scale"].iloc[0]
     assert recomputed == pytest.approx(first["mase"])
+
+
+def test_combination_is_charged_its_members_runtime():
+    rows = [
+        {"model": m, "unique_id": "A", "window": 0, "seconds_per_series": t}
+        for m, t in [("ets", 0.1), ("arima", 0.5), ("theta", 0.2), ("comb", 0.0)]
+    ]
+    scores = attribute_combination_cost(pd.DataFrame(rows))
+    assert scores.loc[scores["model"] == "comb", "seconds_per_series"].item() == pytest.approx(0.8)

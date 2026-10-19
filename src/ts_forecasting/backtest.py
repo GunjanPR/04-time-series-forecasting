@@ -102,3 +102,24 @@ def leaderboard(
     if baseline in board.index:
         board.insert(1, "rel_mase", board["mase"] / board.loc[baseline, "mase"])
     return board.sort_values("mase")
+
+
+COMBINATIONS = {"comb": ("ets", "arima", "theta")}
+
+
+def attribute_combination_cost(scores: pd.DataFrame) -> pd.DataFrame:
+    """A combination reuses its members' cached forecasts, so its measured runtime is near
+    zero. Charge it the sum of its members' runtimes instead (when they were run)."""
+    scores = scores.copy()
+    for combo, members in COMBINATIONS.items():
+        if combo not in set(scores["model"]) or not set(members) <= set(scores["model"]):
+            continue
+        member_cost = (
+            scores[scores["model"].isin(members)]
+            .groupby(["unique_id", "window"])["seconds_per_series"]
+            .sum()
+        )
+        mask = scores["model"] == combo
+        keys = pd.MultiIndex.from_frame(scores.loc[mask, ["unique_id", "window"]])
+        scores.loc[mask, "seconds_per_series"] = member_cost.reindex(keys).to_numpy()
+    return scores
