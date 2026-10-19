@@ -308,15 +308,32 @@ class LightGBMGlobal:
     `intervals="adaptive"` (default) each error is first divided by its series' in-sample
     seasonal-naive MAE, so interval width follows each series' volatility; `"global"` uses one
     error distribution for every series.
+
+    `calibration_origins=k` (default 1) collects the conformal errors from k forecast origins
+    instead of one: a model fitted with the last k*h points held out forecasts from each of
+    the k origins h, 2h, ... kh before the end. One origin calibrates on only the last h
+    points of every series, which misses seasonal swings longer than h.
     """
 
     name = "lgbm"
 
-    def __init__(self, seed: int = 42, n_jobs: int = -1, intervals: str = "adaptive", **params):
+    def __init__(
+        self,
+        seed: int = 42,
+        n_jobs: int = -1,
+        intervals: str = "adaptive",
+        calibration_origins: int = 1,
+        **params,
+    ):
         if intervals not in ("adaptive", "global"):
             raise ValueError(f"intervals must be 'adaptive' or 'global', not {intervals!r}")
+        if calibration_origins < 1:
+            raise ValueError("calibration_origins must be at least 1")
         self.intervals = intervals
+        self.calibration_origins = calibration_origins
         self.name = "lgbm" if intervals == "adaptive" else "lgbm_global"
+        if calibration_origins > 1:
+            self.name += f"_cal{calibration_origins}"
         self.params = {
             "n_estimators": 500,
             "learning_rate": 0.03,
@@ -404,18 +421,35 @@ class LightGBMGlobal:
             spreads[uid] = mae if mae > 0 else 1.0
         return spreads
 
+    def _calibration_errors(self, train: pd.DataFrame, h: int, season: int) -> np.ndarray:
+        """Absolute errors in units of each series' spread, one row per (series, origin)."""
+        k = self.calibration_origins
+        position = train.groupby("unique_id", sort=False).cumcount(ascending=False)
+        fit = train[position >= k * h]
+        if not (fit.groupby("unique_id").size() > season).any():
+            raise ValueError(
+                f"calibration_origins={k} leaves no series with more than one season of "
+                f"history before the oldest origin; use fewer origins"
+            )
+        model = self._fit(fit, season)
+        errors = []
+        for held_out in range(k * h, 0, -h):  # origins from the oldest to the latest
+            history = train[position >= held_out]
+            future = train[(position < held_out) & (position >= held_out - h)]
+            # an origin needs more than one season of history for the seasonal spread
+            lengths = history.groupby("unique_id", sort=False).size()
+            keep = lengths.index[lengths > season]
+            history = history[history["unique_id"].isin(keep)]
+            pred = self._predict(model, history, h, season)
+            spread = self._spreads(history, pred, season)
+            for uid, g in future[future["unique_id"].isin(keep)].groupby("unique_id", sort=False):
+                errors.append(np.abs(g["y"].to_numpy(float) / pred[uid][1] - pred[uid][0]))
+                errors[-1] /= spread[uid]
+        return np.array(errors)  # (n_series x origins, h)
+
     def forecast(self, train, h, season, levels=(80, 95)):
         train = train.sort_values(["unique_id", "ds"])
-        position = train.groupby("unique_id", sort=False).cumcount(ascending=False)
-        calib_train, calib_test = train[position >= h], train[position < h]
-        calib = self._predict(self._fit(calib_train, season), calib_train, h, season)
-        calib_spread = self._spreads(calib_train, calib, season)
-        errors = np.array(
-            [
-                np.abs(g["y"].to_numpy(float) / calib[uid][1] - calib[uid][0]) / calib_spread[uid]
-                for uid, g in calib_test.groupby("unique_id", sort=False)
-            ]
-        )  # (n_series, h), in units of each series' spread
+        errors = self._calibration_errors(train, h, season)
         quantiles = {level: np.quantile(errors, level / 100, axis=0) for level in levels}
 
         final = self._predict(self._fit(train, season), train, h, season)
@@ -464,6 +498,10 @@ def build(name: str, n_jobs: int = -1, seed: int = 42) -> Forecaster:
         # ablation: one conformal error distribution for all series (not in MODEL_NAMES)
         "lgbm_global": lambda: LightGBMGlobal(seed=seed, n_jobs=n_jobs, intervals="global"),
     }
+    if name.startswith("lgbm_cal") and name[len("lgbm_cal") :].isdigit():
+        # ablation: conformal errors from k origins (e.g. lgbm_cal4; not in MODEL_NAMES)
+        k = int(name[len("lgbm_cal") :])
+        return LightGBMGlobal(seed=seed, n_jobs=n_jobs, calibration_origins=k)
     return factories[name]()
 
 

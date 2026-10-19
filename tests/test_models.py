@@ -8,6 +8,7 @@ from conftest import seasonal_frame
 from ts_forecasting.models import (
     MODEL_NAMES,
     Combination,
+    LightGBMGlobal,
     Naive,
     Naive2,
     SeasonalNaive,
@@ -117,6 +118,34 @@ def test_adaptive_intervals_follow_series_volatility():
         width[name] = volatile / calm
     assert width["lgbm"] > 3 * width["lgbm_global"]
     assert build("lgbm_global").name == "lgbm_global"
+
+
+def test_multi_origin_calibration_collects_errors_from_every_origin(frame):
+    one = LightGBMGlobal(n_jobs=1)._calibration_errors(frame, H, SEASON)
+    three = LightGBMGlobal(n_jobs=1, calibration_origins=3)._calibration_errors(frame, H, SEASON)
+    assert one.shape == (3, H)  # 3 series x 1 origin
+    assert three.shape == (9, H)  # 3 series x 3 origins (72 points leave > 1 season each)
+    assert (three >= 0).all()
+
+
+def test_origins_without_a_season_of_history_are_skipped():
+    long = seasonal_frame(n_series=1, length=72)
+    short = seasonal_frame(n_series=1, length=40).assign(unique_id="short")
+    df = pd.concat([long, short], ignore_index=True)
+    # 40 - 3 x 12 leaves 4 points (less than a season) before the oldest origin
+    errors = LightGBMGlobal(n_jobs=1, calibration_origins=3)._calibration_errors(df, H, SEASON)
+    assert errors.shape == (5, H)  # long: 3 origins, short: the 2 recent ones
+
+    with pytest.raises(ValueError, match="calibration_origins"):
+        LightGBMGlobal(n_jobs=1, calibration_origins=3)._calibration_errors(short, H, SEASON)
+
+
+def test_calibration_origins_is_validated_and_named():
+    assert LightGBMGlobal(calibration_origins=4).name == "lgbm_cal4"
+    assert LightGBMGlobal().name == "lgbm"
+    assert build("lgbm_cal8").calibration_origins == 8
+    with pytest.raises(ValueError):
+        LightGBMGlobal(calibration_origins=0)
 
 
 def _daily_frame(n_series=8, length=140):
