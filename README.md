@@ -150,6 +150,13 @@ python -m ts_forecasting.benchmark --models snaive,ets,theta --max-series 100 --
 Per-model scores are saved under `results/<dataset>/<config>/`, and a re-run reuses every
 model that already finished (`--force` recomputes). An interrupted run therefore resumes.
 
+![Dashboard: series explorer](docs/dashboard-explorer.png)
+
+*Series explorer: history before the cutoff (grey), the actuals (black), and each model's
+forecast with its prediction interval. The Leaderboard, Significance and Where-baselines-win
+tabs show the published results for either dataset
+([screenshot](docs/dashboard-leaderboard.png)).*
+
 ### Docker
 ```bash
 docker compose up --build         # runs the M4 benchmark, then serves the dashboard on :8501

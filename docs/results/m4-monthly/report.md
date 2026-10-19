@@ -1,6 +1,6 @@
 # Benchmark report: m4-monthly
 
-500 series, horizon 18, 3 rolling-origin windows (1363 series-windows per model), seed 42. Baseline: seasonal naive. Lower is better for every error metric.
+500 series, horizon 18, 3 rolling-origin windows (1500 series-windows per model), seed 42. Baseline: seasonal naive. Lower is better for every error metric.
 
 ## Leaderboard
 

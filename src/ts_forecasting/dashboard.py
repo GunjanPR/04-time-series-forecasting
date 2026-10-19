@@ -36,9 +36,13 @@ def load_forecasts(run: Path) -> pd.DataFrame:
 
 
 @st.cache_data
-def load_history(pattern: str) -> pd.DataFrame | None:
-    files = sorted((ROOT / "data" / "processed").glob(pattern))
-    return pd.read_parquet(files[-1]) if files else None
+def load_history(dataset: str) -> pd.DataFrame | None:
+    """Every cached sample of the dataset, so any benchmarked series can be found."""
+    files = sorted((ROOT / "data" / "processed").glob(f"{dataset}_*.parquet"))
+    if not files:
+        return None
+    frames = pd.concat(pd.read_parquet(f) for f in files)
+    return frames.drop_duplicates(["unique_id", "ds"])
 
 
 def leaderboard_tab(published: Path) -> None:
@@ -69,31 +73,93 @@ def baselines_tab(published: Path) -> None:
 
 
 def explorer_tab(dataset: str) -> None:
-    runs = sorted(p for p in (RESULTS / dataset).glob("*") if (p / "forecasts").exists())
+    import altair as alt
+
+    runs = sorted(
+        (p for p in (RESULTS / dataset).glob("*") if (p / "forecasts").exists()),
+        key=lambda p: ("jobs" in p.name, p.name),  # the main run first, cost profiles last
+    )
     if not runs:
         st.info("Run `make run` to create a local benchmark run; its forecasts appear here.")
         return
     run = st.selectbox("Benchmark run", runs, format_func=lambda p: p.name)
     forecasts = load_forecasts(run)
-    history = load_history(f"{run.parent.name}_*.parquet")
+    history = load_history(dataset)
     models = sorted(forecasts["model"].unique())
     left, mid, right = st.columns([2, 1, 3])
     uid = left.selectbox("Series", sorted(forecasts["unique_id"].unique()))
-    window = mid.selectbox("Window", sorted(forecasts["window"].unique()), index=0)
+    windows = sorted(forecasts["window"].unique())
+    window = mid.selectbox("Window", windows, index=len(windows) - 1)
     chosen = right.multiselect(
         "Models", models, default=[m for m in ("snaive", "comb", "lgbm") if m in models],
         format_func=label,
     )  # fmt: skip
     level = st.radio("Interval", [80, 95], horizontal=True)
     part = forecasts[(forecasts["unique_id"] == uid) & (forecasts["window"] == window)]
-    chart = part[part["model"] == models[0]][["step", "y"]].rename(columns={"y": "actual"})
+    first = part[part["model"] == part["model"].iloc[0]].sort_values("step")
+    h = len(first)
+
+    # Dates for the forecast steps: the last h points before the cutoff of this window.
+    series = history[history["unique_id"] == uid].sort_values("ds") if history is not None else None
+    if series is not None and len(series):
+        n_after = (len(windows) - 1 - windows.index(window)) * h
+        end = len(series) - n_after
+        dates = series["ds"].iloc[end - h : end].to_numpy()
+        past = series.iloc[max(0, end - h - 4 * h) : end - h]
+    else:
+        dates, past = first["step"].to_numpy(), None
+
+    layers = []
+    if past is not None:
+        layers.append(
+            alt.Chart(past.assign(kind="history"))
+            .mark_line(color="#888")
+            .encode(x=alt.X("ds:T", title=None), y=alt.Y("y:Q", scale=alt.Scale(zero=False)))
+        )
+    actual = pd.DataFrame({"ds": dates, "y": first["y"].to_numpy()})
+    lines = []
     for model in chosen:
-        m = part[part["model"] == model].set_index("step")
-        chart[label(model)] = m["mean"].reindex(chart["step"]).to_numpy()
-    st.line_chart(chart.set_index("step"))
-    if history is not None:
-        st.caption("Full history of the series (the backtest covers the last points).")
-        st.line_chart(history[history["unique_id"] == uid].set_index("ds")["y"])
+        m = part[part["model"] == model].sort_values("step")
+        lines.append(pd.DataFrame({"ds": dates, "y": m["mean"].to_numpy(), "series": label(model)}))
+        band = pd.DataFrame(
+            {
+                "ds": dates,
+                "lo": m[f"lo-{level}"].to_numpy(),
+                "hi": m[f"hi-{level}"].to_numpy(),
+                "series": label(model),
+            }
+        )
+        layers.append(
+            alt.Chart(band)
+            .mark_area(opacity=0.12)
+            .encode(
+                x="ds:T",
+                y=alt.Y("lo:Q", scale=alt.Scale(zero=False)),
+                y2="hi:Q",
+                color=alt.Color("series:N", legend=None),
+            )  # fmt: skip
+        )
+    if lines:
+        layers.append(
+            alt.Chart(pd.concat(lines))
+            .mark_line(point=True, strokeDash=[5, 3])
+            .encode(
+                x="ds:T",
+                y=alt.Y("y:Q", title="value", scale=alt.Scale(zero=False)),
+                color=alt.Color("series:N", title=None),
+            )
+        )
+    layers.append(
+        alt.Chart(actual)
+        .mark_line(point=True, color="black")
+        .encode(x="ds:T", y=alt.Y("y:Q", scale=alt.Scale(zero=False)))
+    )
+    st.altair_chart(alt.layer(*layers).properties(height=420), use_container_width=True)
+    st.caption(
+        f"Grey: history before the cutoff. Bands: {level}% prediction intervals. "
+        "Dashed: forecasts; black: what actually happened."
+    )
+
     rows = []
     for model in chosen:
         m = part[part["model"] == model]
@@ -108,7 +174,8 @@ def main() -> None:
     st.set_page_config(page_title="Forecasting benchmark", layout="wide")
     st.title("Time series forecasting benchmark")
     datasets = sorted(p.name for p in PUBLISHED.iterdir() if (p / "leaderboard.csv").exists())
-    dataset = st.sidebar.radio("Dataset", datasets)
+    default = datasets.index("m4-monthly") if "m4-monthly" in datasets else 0
+    dataset = st.sidebar.radio("Dataset", datasets, index=default)
     published = PUBLISHED / dataset
     report = published / "report.md"
     if report.exists():

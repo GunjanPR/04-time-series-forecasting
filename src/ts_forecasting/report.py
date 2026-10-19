@@ -178,7 +178,8 @@ def build_report(settings: Settings | None = None, publish: Path | None = None) 
         f"# Benchmark report: {settings.dataset}",
         "",
         f"{n_series} series, horizon {settings.horizon}, {n_windows} rolling-origin windows "
-        f"({len(scores) // board.shape[0]} series-windows per model), seed {settings.random_seed}. "
+        f"({len(scores) // scores['model'].nunique()} series-windows per model), "
+        f"seed {settings.random_seed}. "
         "Baseline: seasonal naive. Lower is better for every error metric.",
         "",
         "## Leaderboard",
