@@ -4,7 +4,7 @@
 
 For every series, features are computed on its history before the first backtest window
 (so they use no test data): STL trend and seasonal strength (Wang, Smith & Hyndman, 2006),
-length, and the volatility of month-on-month changes. Series are grouped into quintiles of
+length, and the volatility of period-on-period changes. Series are grouped into quintiles of
 each feature and, per quintile, we report how often the simple method beats the challenger
 on per-series MASE and the mean MASE of both.
 """
@@ -24,15 +24,15 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from ts_forecasting.config import Settings, get_settings  # noqa: E402
-from ts_forecasting.data import SEASON_LENGTH, load  # noqa: E402
+from ts_forecasting.data import DATASETS, load, resolve  # noqa: E402
 
 log = logging.getLogger(__name__)
 
 FEATURES = {
     "seasonal_strength": "Seasonal strength (STL)",
     "trend_strength": "Trend strength (STL)",
-    "length": "History length (months)",
-    "volatility": "Volatility of monthly % changes",
+    "length": "History length (periods)",
+    "volatility": "Volatility of period-on-period % changes",
 }
 
 
@@ -108,12 +108,12 @@ def analyse(
     from ts_forecasting.report import load_run
     from ts_forecasting.stats import per_series_mase
 
-    settings = settings or get_settings()
+    settings = resolve(settings or get_settings())
     out = run_dir(settings)
     scores, _ = load_run(out)
     per_series = per_series_mase(scores)
     holdout = settings.horizon * settings.n_windows
-    features = feature_table(load(settings), holdout, SEASON_LENGTH[settings.dataset])
+    features = feature_table(load(settings), holdout, DATASETS[settings.dataset].season)
     table = win_table(features, per_series, simple, challenger)
 
     stem = f"baseline_wins_{simple}_vs_{challenger}"
@@ -135,9 +135,13 @@ def main() -> None:
     parser.add_argument("--simple", default="naive2")
     parser.add_argument("--challenger", default="comb")
     parser.add_argument("--publish", type=Path)
+    parser.add_argument("--dataset", choices=sorted(DATASETS))
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    analyse(simple=args.simple, challenger=args.challenger, publish=args.publish)
+    settings = get_settings()
+    if args.dataset:
+        settings = settings.model_copy(update={"dataset": args.dataset})
+    analyse(settings, simple=args.simple, challenger=args.challenger, publish=args.publish)
 
 
 if __name__ == "__main__":

@@ -41,8 +41,8 @@ desktop.ini
 .idea/
 
 # Project-specific: datasets, results, experiment logs
-data/
-results/
+/data/
+/results/
 mlruns/
 *.parquet
 *.csv.gz

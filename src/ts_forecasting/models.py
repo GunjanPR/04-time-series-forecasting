@@ -52,6 +52,22 @@ def _gaussian(uid, mean: np.ndarray, sigma_h: np.ndarray, levels: Levels) -> pd.
     return pd.DataFrame(out)
 
 
+def infer_freq(train: pd.DataFrame) -> str:
+    """Pandas frequency of the series (taken from the first one); monthly if unclear."""
+    first = train[train["unique_id"] == train["unique_id"].iloc[0]]["ds"].sort_values()
+    return pd.infer_freq(first) or "MS"
+
+
+def season_position(ds: pd.Series | pd.DatetimeIndex, season: int) -> np.ndarray:
+    """1-based position inside the season: month for monthly data, weekday for daily data."""
+    ds = pd.DatetimeIndex(ds)
+    if season == 12:
+        return ds.month.to_numpy()
+    if season == 7:
+        return ds.dayofweek.to_numpy() + 1
+    return (np.arange(len(ds)) % season) + 1
+
+
 def _series(train: pd.DataFrame):
     for uid, group in train.groupby("unique_id", sort=False):
         yield uid, group["y"].to_numpy(float)
@@ -172,7 +188,7 @@ class StatsForecastModel:
         from statsforecast import StatsForecast
 
         model = self._model(season)
-        sf = StatsForecast(models=[model], freq="MS", n_jobs=self.n_jobs)
+        sf = StatsForecast(models=[model], freq=infer_freq(train), n_jobs=self.n_jobs)
         fc = sf.forecast(df=train[["unique_id", "ds", "y"]], h=h, level=list(levels))
         alias = str(model)
         out = pd.DataFrame(
@@ -236,7 +252,9 @@ def ensure_prophet_tbb() -> None:
             break
 
 
-def _prophet_one(uid, ds: pd.Series, y: np.ndarray, h: int, levels: Levels) -> pd.DataFrame:
+def _prophet_one(
+    uid, ds: pd.Series, y: np.ndarray, h: int, levels: Levels, freq: str = "MS"
+) -> pd.DataFrame:
     from prophet import Prophet
 
     ensure_prophet_tbb()
@@ -245,12 +263,12 @@ def _prophet_one(uid, ds: pd.Series, y: np.ndarray, h: int, levels: Levels) -> p
         logging.getLogger(name).setLevel(logging.ERROR)
     model = Prophet(
         yearly_seasonality=True,
-        weekly_seasonality=False,
+        weekly_seasonality=freq == "D",
         daily_seasonality=False,
         uncertainty_samples=500,
     )
     model.fit(pd.DataFrame({"ds": ds.to_numpy(), "y": y}))
-    future = model.make_future_dataframe(periods=h, freq="MS", include_history=False)
+    future = model.make_future_dataframe(periods=h, freq=freq, include_history=False)
     mean = model.predict(future)["yhat"].to_numpy()
     samples = model.predictive_samples(future)["yhat"]  # shape (h, n_samples)
     out = {"unique_id": uid, "step": np.arange(1, h + 1), "mean": mean}
@@ -268,8 +286,9 @@ class ProphetModel:
 
     def forecast(self, train, h, season, levels=(80, 95)):
         groups = train.groupby("unique_id", sort=False)
+        freq = infer_freq(train)
         frames = Parallel(n_jobs=self.n_jobs)(
-            delayed(_prophet_one)(uid, g["ds"], g["y"].to_numpy(float), h, levels)
+            delayed(_prophet_one)(uid, g["ds"], g["y"].to_numpy(float), h, levels, freq)
             for uid, g in groups
         )
         return pd.concat(frames, ignore_index=True)
@@ -280,7 +299,8 @@ class LightGBMGlobal:
 
     Each series is divided by the mean of its last `season` training values, so series on very
     different scales share one model. Features: lags 1..2m, rolling means of the last 3 and m
-    values, and month of year; training rows start one season into each series.
+    values, and the position in the season (month of year for monthly data, day of week
+    for daily data); training rows start one season into each series.
 
     Prediction intervals are split-conformal per horizon step: the model is first fitted with
     the last `h` points of every series held out, and the errors on those points give a
@@ -313,23 +333,23 @@ class LightGBMGlobal:
         }
 
     @staticmethod
-    def _features(window: np.ndarray, month: int, season: int) -> np.ndarray:
+    def _features(window: np.ndarray, position: int, season: int) -> np.ndarray:
         """Features for the next value, from the last 2m scaled values (oldest first).
         Histories shorter than 2m (early backtest windows) are left-padded with their first
         value."""
         if len(window) < 2 * season:
             window = np.r_[np.full(2 * season - len(window), window[0]), window]
         lags = window[::-1][: 2 * season]
-        return np.r_[lags, window[-3:].mean(), window[-season:].mean(), month]
+        return np.r_[lags, window[-3:].mean(), window[-season:].mean(), position]
 
     def _design(self, train: pd.DataFrame, season: int):
         rows, targets = [], []
         for _, g in train.groupby("unique_id", sort=False):
             y = g["y"].to_numpy(float)
             y = y / self._scale(y, season)
-            months = g["ds"].dt.month.to_numpy()
+            positions = season_position(g["ds"], season)
             for t in range(season, len(y)):
-                rows.append(self._features(y[max(0, t - 2 * season) : t], months[t], season))
+                rows.append(self._features(y[max(0, t - 2 * season) : t], positions[t], season))
                 targets.append(y[t])
         return np.array(rows), np.array(targets)
 
@@ -346,12 +366,12 @@ class LightGBMGlobal:
 
     def _predict(self, model, train: pd.DataFrame, h: int, season: int):
         """Recursive h-step forecasts on the scaled level. Returns ({uid: (scaled, scale)})."""
-        histories, scales, next_month = {}, {}, {}
+        histories, scales, last_position = {}, {}, {}
         for uid, g in train.groupby("unique_id", sort=False):
             y = g["y"].to_numpy(float)
             scales[uid] = self._scale(y, season)
             histories[uid] = list(y[-2 * season :] / scales[uid])
-            next_month[uid] = g["ds"].iloc[-1].month % 12 + 1
+            last_position[uid] = int(season_position(g["ds"].iloc[-1:], season)[0])
         uids = list(histories)
         preds = {uid: [] for uid in uids}
         for step in range(h):
@@ -359,7 +379,7 @@ class LightGBMGlobal:
                 [
                     self._features(
                         np.array(histories[u][-2 * season :]),
-                        (next_month[u] + step - 1) % 12 + 1,
+                        (last_position[u] + step) % season + 1,
                         season,
                     )
                     for u in uids

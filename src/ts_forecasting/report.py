@@ -24,6 +24,7 @@ import pandas as pd  # noqa: E402
 
 from ts_forecasting.backtest import attribute_combination_cost, leaderboard  # noqa: E402
 from ts_forecasting.config import Settings, get_settings  # noqa: E402
+from ts_forecasting.data import DATASETS, resolve  # noqa: E402
 from ts_forecasting.stats import (  # noqa: E402
     dm_summary,
     friedman_nemenyi,
@@ -33,6 +34,7 @@ from ts_forecasting.stats import (  # noqa: E402
 log = logging.getLogger(__name__)
 
 BASELINE = "snaive"
+ABLATIONS = {"lgbm_global"}
 LABELS = {
     "snaive": "Seasonal naive",
     "naive": "Naive",
@@ -123,14 +125,14 @@ def plot_accuracy_vs_cost(board: pd.DataFrame, path: Path) -> None:
     plt.close(fig)
 
 
-def plot_mase_by_step(forecasts: pd.DataFrame, path: Path) -> None:
+def plot_mase_by_step(forecasts: pd.DataFrame, path: Path, unit: str = "month") -> None:
     loss = forecasts.assign(err=np.abs(forecasts["y"] - forecasts["mean"]) / forecasts["scale"])
     curve = loss.groupby(["model", "step"])["err"].mean().unstack(0)
     fig, ax = plt.subplots(figsize=(7, 4.5))
     for model in curve.columns:
         ax.plot(curve.index, curve[model], label=LABELS.get(model, model),
                 lw=2.2 if model == BASELINE else 1.2)  # fmt: skip
-    ax.set_xlabel("Forecast step (months ahead)")
+    ax.set_xlabel(f"Forecast step ({unit}s ahead)")
     ax.set_ylabel("Mean absolute scaled error")
     ax.legend(fontsize=7, ncol=2)
     fig.tight_layout()
@@ -141,10 +143,15 @@ def plot_mase_by_step(forecasts: pd.DataFrame, path: Path) -> None:
 def build_report(settings: Settings | None = None, publish: Path | None = None) -> Path:
     from ts_forecasting.benchmark import run_dir
 
-    settings = settings or get_settings()
+    settings = resolve(settings or get_settings())
     out = run_dir(settings)
-    scores, forecasts = load_run(out)
-    board = leaderboard(scores, baseline=BASELINE)
+    unit = DATASETS[settings.dataset].unit
+    all_scores, all_forecasts = load_run(out)
+    board = leaderboard(all_scores, baseline=BASELINE)
+    # Ablation variants share their parent's point forecasts; keep them out of the tests and
+    # ranks so they do not count as extra competitors.
+    scores = all_scores[~all_scores["model"].isin(ABLATIONS)]
+    forecasts = all_forecasts[~all_forecasts["model"].isin(ABLATIONS)]
     significance = wilcoxon_summary(scores, baseline=BASELINE, seed=settings.random_seed).join(
         dm_summary(forecasts, baseline=BASELINE)
     )
@@ -155,9 +162,11 @@ def build_report(settings: Settings | None = None, publish: Path | None = None) 
     plots = {
         "mase_vs_baseline.png": lambda p: plot_relative_mase(significance, p),
         "ranks.png": lambda p: plot_ranks(ranks, cd, p),
-        "coverage.png": lambda p: plot_coverage(board, p),
-        "accuracy_vs_cost.png": lambda p: plot_accuracy_vs_cost(board, p),
-        "mase_by_step.png": lambda p: plot_mase_by_step(forecasts, p),
+        "coverage.png": lambda p: plot_coverage(board.drop(ABLATIONS, errors="ignore"), p),
+        "accuracy_vs_cost.png": lambda p: plot_accuracy_vs_cost(
+            board.drop(ABLATIONS, errors="ignore"), p
+        ),
+        "mase_by_step.png": lambda p: plot_mase_by_step(forecasts, p, unit),
     }
     for name, draw in plots.items():
         draw(out / name)
@@ -210,9 +219,13 @@ def build_report(settings: Settings | None = None, publish: Path | None = None) 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--publish", type=Path, help="also copy report + plots here")
+    parser.add_argument("--dataset", choices=sorted(DATASETS))
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    build_report(publish=args.publish)
+    settings = get_settings()
+    if args.dataset:
+        settings = settings.model_copy(update={"dataset": args.dataset})
+    build_report(settings, publish=args.publish)
 
 
 if __name__ == "__main__":

@@ -17,18 +17,20 @@ import pandas as pd
 
 from ts_forecasting.backtest import attribute_combination_cost, leaderboard, run_backtest
 from ts_forecasting.config import Settings, get_settings
-from ts_forecasting.data import SEASON_LENGTH, load
+from ts_forecasting.data import DATASETS, load, resolve
 from ts_forecasting.models import MODEL_NAMES, build
 
 log = logging.getLogger(__name__)
 
 
 def run_dir(settings: Settings):
+    settings = resolve(settings)
     n = settings.max_series or "all"
+    jobs = "" if settings.n_jobs == -1 else f"_jobs{settings.n_jobs}"
     return (
         settings.results_dir
         / settings.dataset
-        / f"n{n}_h{settings.horizon}_w{settings.n_windows}_seed{settings.random_seed}"
+        / f"n{n}_h{settings.horizon}_w{settings.n_windows}_seed{settings.random_seed}{jobs}"
     )
 
 
@@ -37,11 +39,11 @@ def benchmark(
 ) -> pd.DataFrame:
     """Backtest each model, reusing per-model scores already saved for the same configuration
     (unless `force`), so an interrupted run resumes instead of starting over."""
-    settings = settings or get_settings()
+    settings = resolve(settings or get_settings())
     out = run_dir(settings)
     (out / "scores").mkdir(parents=True, exist_ok=True)
     df = load(settings)
-    season = SEASON_LENGTH[settings.dataset]
+    season = DATASETS[settings.dataset].season
     log.info(
         "%s: %d series, h=%d, %d windows",
         settings.dataset,
@@ -97,10 +99,13 @@ def log_to_mlflow(board: pd.DataFrame, settings: Settings, out) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--dataset", choices=sorted(SEASON_LENGTH))
+    parser.add_argument("--dataset", choices=sorted(DATASETS))
     parser.add_argument("--horizon", type=int)
     parser.add_argument("--windows", type=int, dest="n_windows")
     parser.add_argument("--max-series", type=int)
+    parser.add_argument(
+        "--n-jobs", type=int, help="worker processes (-1 = all cores; 1 = single-core cost)"
+    )
     parser.add_argument("--models", default=",".join(MODEL_NAMES))
     parser.add_argument("--force", action="store_true", help="recompute saved model scores")
     args = parser.parse_args()

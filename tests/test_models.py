@@ -117,3 +117,34 @@ def test_adaptive_intervals_follow_series_volatility():
         width[name] = volatile / calm
     assert width["lgbm"] > 3 * width["lgbm_global"]
     assert build("lgbm_global").name == "lgbm_global"
+
+
+def _daily_frame(n_series=8, length=140):
+    rng = np.random.default_rng(5)
+    t = np.arange(length)
+    frames = []
+    for i in range(n_series):
+        weekly = np.array([1.0, 1.1, 1.1, 1.05, 1.0, 0.6, 0.5])[t % 7]
+        y = (100 + i) * weekly + rng.normal(0, 2, length)
+        ds = pd.date_range("2013-01-07", periods=length, freq="D")  # a Monday
+        frames.append(pd.DataFrame({"unique_id": f"D{i}", "ds": ds, "y": y}))
+    return pd.concat(frames, ignore_index=True)
+
+
+def test_frequency_and_season_position_helpers():
+    from ts_forecasting.models import infer_freq, season_position
+
+    daily = _daily_frame(1, 14)
+    assert infer_freq(daily) == "D"
+    assert infer_freq(seasonal_frame(n_series=1)) == "MS"
+    assert season_position(daily["ds"], 7).tolist()[:8] == [1, 2, 3, 4, 5, 6, 7, 1]
+    months = pd.date_range("2015-11-01", periods=3, freq="MS")
+    assert season_position(months, 12).tolist() == [11, 12, 1]
+
+
+@pytest.mark.parametrize("name", MODEL_NAMES)
+def test_every_model_runs_on_daily_data(name):
+    df = _daily_frame()
+    fc = build(name, n_jobs=1).forecast(df, 14, 7, LEVELS)
+    assert len(fc) == 8 * 14
+    assert np.isfinite(fc["mean"]).all()

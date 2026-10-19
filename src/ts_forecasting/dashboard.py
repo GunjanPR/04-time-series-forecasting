@@ -2,8 +2,8 @@
 
     streamlit run src/ts_forecasting/dashboard.py          # or: make dashboard
 
-Shows the published results in `docs/results/` (committed, so the dashboard works on a fresh
-clone) and, when a local benchmark run exists under `results/`, an interactive explorer of
+Shows the published results in `docs/results/<dataset>/` (committed, so the dashboard works
+on a fresh clone) and, when a local benchmark run exists under `results/`, an interactive explorer of
 every series' backtest forecasts and intervals.
 """
 
@@ -41,39 +41,39 @@ def load_history(pattern: str) -> pd.DataFrame | None:
     return pd.read_parquet(files[-1]) if files else None
 
 
-def leaderboard_tab() -> None:
-    board = read_csv(PUBLISHED / "leaderboard.csv", index_col=0)
+def leaderboard_tab(published: Path) -> None:
+    board = read_csv(published / "leaderboard.csv", index_col=0)
     st.subheader("Leaderboard")
     st.caption("Means over every series and backtest window. Lower is better.")
     st.dataframe(board.rename(index=label).style.format(precision=3), use_container_width=True)
     left, right = st.columns(2)
-    left.image(str(PUBLISHED / "mase_vs_baseline.png"))
-    right.image(str(PUBLISHED / "accuracy_vs_cost.png"))
-    left.image(str(PUBLISHED / "coverage.png"))
-    right.image(str(PUBLISHED / "mase_by_step.png"))
+    left.image(str(published / "mase_vs_baseline.png"))
+    right.image(str(published / "accuracy_vs_cost.png"))
+    left.image(str(published / "coverage.png"))
+    right.image(str(published / "mase_by_step.png"))
 
 
-def significance_tab() -> None:
-    sig = read_csv(PUBLISHED / "significance.csv", index_col=0)
+def significance_tab(published: Path) -> None:
+    sig = read_csv(published / "significance.csv", index_col=0)
     st.subheader("Is the difference real?")
     st.dataframe(sig.rename(index=label).style.format(precision=3), use_container_width=True)
-    st.image(str(PUBLISHED / "ranks.png"))
+    st.image(str(published / "ranks.png"))
 
 
-def baselines_tab() -> None:
+def baselines_tab(published: Path) -> None:
     st.subheader("Where simple baselines win")
-    for path in sorted(PUBLISHED.glob("baseline_wins_*.png")):
+    for path in sorted(published.glob("baseline_wins_*.png")):
         simple, challenger = path.stem.removeprefix("baseline_wins_").split("_vs_")
         st.markdown(f"**{label(simple)}** vs **{label(challenger)}**")
         st.image(str(path))
 
 
-def explorer_tab() -> None:
-    runs = sorted(p for p in RESULTS.glob("*/*") if (p / "forecasts").exists())
+def explorer_tab(dataset: str) -> None:
+    runs = sorted(p for p in (RESULTS / dataset).glob("*") if (p / "forecasts").exists())
     if not runs:
         st.info("Run `make run` to create a local benchmark run; its forecasts appear here.")
         return
-    run = st.selectbox("Benchmark run", runs, format_func=lambda p: f"{p.parent.name}/{p.name}")
+    run = st.selectbox("Benchmark run", runs, format_func=lambda p: p.name)
     forecasts = load_forecasts(run)
     history = load_history(f"{run.parent.name}_*.parquet")
     models = sorted(forecasts["model"].unique())
@@ -107,18 +107,21 @@ def explorer_tab() -> None:
 def main() -> None:
     st.set_page_config(page_title="Forecasting benchmark", layout="wide")
     st.title("Time series forecasting benchmark")
-    report = PUBLISHED / "report.md"
+    datasets = sorted(p.name for p in PUBLISHED.iterdir() if (p / "leaderboard.csv").exists())
+    dataset = st.sidebar.radio("Dataset", datasets)
+    published = PUBLISHED / dataset
+    report = published / "report.md"
     if report.exists():
         st.caption(report.read_text(encoding="utf-8").splitlines()[2])
     tabs = st.tabs(["Leaderboard", "Significance", "Where baselines win", "Series explorer"])
     with tabs[0]:
-        leaderboard_tab()
+        leaderboard_tab(published)
     with tabs[1]:
-        significance_tab()
+        significance_tab(published)
     with tabs[2]:
-        baselines_tab()
+        baselines_tab(published)
     with tabs[3]:
-        explorer_tab()
+        explorer_tab(dataset)
 
 
 main()

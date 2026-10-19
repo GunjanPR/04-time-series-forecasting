@@ -7,7 +7,6 @@ last window therefore tests on the final `h` points of every series.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import time
 from collections.abc import Iterator
@@ -19,18 +18,6 @@ from ts_forecasting.metrics import coverage, mase, mase_scale, msis, rmse, smape
 from ts_forecasting.models import Forecaster
 
 log = logging.getLogger(__name__)
-
-
-def cpu_seconds() -> float:
-    """CPU time (user + system) of this process and its live children (joblib workers)."""
-    import psutil
-
-    me = psutil.Process()
-    total = sum(me.cpu_times()[:2])
-    for child in me.children(recursive=True):
-        with contextlib.suppress(psutil.Error):
-            total += sum(child.cpu_times()[:2])
-    return total
 
 
 def rolling_origin_splits(
@@ -64,18 +51,10 @@ def run_backtest(
     df = df.sort_values(["unique_id", "ds"]).reset_index(drop=True)
     rows, paths = [], []
     for window, train, test in rolling_origin_splits(df, h, n_windows):
-        start, cpu_start = time.perf_counter(), cpu_seconds()
+        start = time.perf_counter()
         fc = model.forecast(train, h, season, levels)
         seconds = time.perf_counter() - start
-        cpu = cpu_seconds() - cpu_start
-        log.info(
-            "%s window %d/%d: %.1fs wall, %.1fs CPU",
-            model.name,
-            window + 1,
-            n_windows,
-            seconds,
-            cpu,
-        )
+        log.info("%s window %d/%d: %.1fs", model.name, window + 1, n_windows, seconds)
         n_series = train["unique_id"].nunique()
         fc = fc.set_index(["unique_id", "step"])
         train_y = {uid: g.to_numpy(float) for uid, g in train.groupby("unique_id")["y"]}
@@ -92,7 +71,6 @@ def run_backtest(
                 "smape": smape(y, y_hat),
                 "rmse": rmse(y, y_hat),
                 "seconds_per_series": seconds / n_series,
-                "cpu_seconds_per_series": cpu / n_series,
             }
             for level in levels:
                 lo, hi = f[f"lo-{level}"].to_numpy(), f[f"hi-{level}"].to_numpy()
@@ -116,11 +94,6 @@ def leaderboard(
         rmse=("rmse", "mean"),
         **{c: (c, "mean") for c in interval_cols},
         ms_per_series=("seconds_per_series", lambda s: 1000 * np.mean(s)),
-        **(
-            {"cpu_ms_per_series": ("cpu_seconds_per_series", lambda s: 1000 * np.mean(s))}
-            if "cpu_seconds_per_series" in scores.columns
-            else {}
-        ),
         n=("mase", "size"),
     )
     if owa_reference in board.index:
@@ -143,11 +116,10 @@ def attribute_combination_cost(scores: pd.DataFrame) -> pd.DataFrame:
             continue
         mask = scores["model"] == combo
         keys = pd.MultiIndex.from_frame(scores.loc[mask, ["unique_id", "window"]])
-        for col in ("seconds_per_series", "cpu_seconds_per_series"):
-            if col not in scores.columns:
-                continue
-            member_cost = (
-                scores[scores["model"].isin(members)].groupby(["unique_id", "window"])[col].sum()
-            )
-            scores.loc[mask, col] = member_cost.reindex(keys).to_numpy()
+        member_cost = (
+            scores[scores["model"].isin(members)]
+            .groupby(["unique_id", "window"])["seconds_per_series"]
+            .sum()
+        )
+        scores.loc[mask, "seconds_per_series"] = member_cost.reindex(keys).to_numpy()
     return scores

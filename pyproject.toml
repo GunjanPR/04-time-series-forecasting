@@ -23,7 +23,6 @@ dependencies = [
     "pydantic-settings>=2.3",
     "tabulate>=0.9",
     "joblib>=1.4",
-    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]

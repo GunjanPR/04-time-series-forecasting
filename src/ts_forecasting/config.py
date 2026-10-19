@@ -13,8 +13,9 @@ class Settings(BaseSettings):
     results_dir: Path = Path("./results")
 
     dataset: str = "m4-monthly"
-    horizon: int = 18
-    n_windows: int = 3
+    # Blank = the dataset's default (see ts_forecasting.data.DATASETS)
+    horizon: int | None = None
+    n_windows: int | None = None
     max_series: int | None = 500
     random_seed: int = 42
     n_jobs: int = -1
