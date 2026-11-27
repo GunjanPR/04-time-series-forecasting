@@ -27,7 +27,7 @@ from ts_forecasting.config import Settings, get_settings
 
 log = logging.getLogger(__name__)
 
-M4_URL = "https://github.com/Mcompetitions/M4-methods/raw/master/Dataset/{part}/Monthly-{split}.csv"
+M4_URL = "https://raw.githubusercontent.com/Mcompetitions/M4-methods/master/Dataset/{part}/Monthly-{split}.csv"
 M4_END = pd.Timestamp("2015-12-01")
 ELECTRICITY_URL = (
     "https://archive.ics.uci.edu/static/public/321/electricityloaddiagrams20112014.zip"
