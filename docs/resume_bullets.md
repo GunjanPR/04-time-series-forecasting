@@ -7,8 +7,9 @@ per resume. The `Resumes/` folder has not been edited.
 Prophet, LightGBM, SciPy, Streamlit, Docker, GitHub Actions |
 github.com/GunjanPR/04-time-series-forecasting
 
-1. Improved MASE by 26-28% against seasonal naive with an ETS + ARIMA + Theta combination,
-   ranked first of 10 methods on two independent samples of 500 M4-Monthly series (1,500
+1. Built an ETS + ARIMA + Theta combination that beat the official M4 benchmark (Naive2) by
+   8.5% (OWA 0.915) and seasonal naive by 26-28% MASE, best of the 10 classical and
+   machine-learning methods on two independent samples of 500 M4-Monthly series (1,500
    rolling-origin series-windows each, h = 18). The gain was confirmed with per-series
    Diebold-Mariano tests, Holm-corrected Wilcoxon tests (p = 3e-51) and Friedman-Nemenyi
    rank tests. *(docs/results/m4-monthly/report.md, docs/results/m4-monthly-seed7/report.md)*
@@ -20,6 +21,12 @@ github.com/GunjanPR/04-time-series-forecasting
    stays within 4-5% of the best MASE at 5-7% of the compute (150 ms vs 2.9 s per series on
    one laptop core, 119 ms vs 1.6 s on a Ryzen 7 9800X3D core).
    *(README, "Robustness"; docs/results/m4-monthly-seed7/sample_comparison.csv)*
+
+1b. Added a zero-shot foundation model (Chronos-2) and a nested-tuned LightGBM to the
+   benchmark. Chronos-2 had the lowest error on both datasets (M4 OWA 0.897 vs 0.915 for the
+   best classical method; electricity 0.868 vs 0.920), with a stated caveat that its
+   pretraining may overlap these datasets. Per-window tuning did not improve LightGBM
+   (±0.01 MASE). *(README, "Foundation model and tuned LightGBM")*
 
 3. Cut the LightGBM prediction-interval score (MSIS) by 51% (22.4 → 11.0) at unchanged 95%
    coverage across 1,500 series-windows, by making split-conformal intervals scale with

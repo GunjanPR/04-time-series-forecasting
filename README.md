@@ -1,13 +1,24 @@
 # Time Series Forecasting Benchmark
 
-A reproducible comparison of 10 forecasting methods (naive baselines, statistical models,
-Prophet and a global LightGBM) on two public datasets, with rolling-origin evaluation,
-interval scoring, runtime cost and significance tests.
+A reproducible comparison of 12 forecasting methods (naive baselines, statistical models,
+Prophet, a global LightGBM with and without tuning, and the Chronos-2 foundation model) on two
+public datasets, with rolling-origin evaluation, interval scoring, runtime cost and
+significance tests.
 
 > Part of the Live Projects portfolio. See [SHARED_STANDARDS.md](../SHARED_STANDARDS.md) for conventions and the milestone definition of done.
 
 **Results at a glance (M4-Monthly, 500 series × 3 rolling windows, h = 18)**
 
+* **Against the official M4 benchmark (Naive2), the best classical method is 8.5% better.**
+  The equal-weight combination of ETS, ARIMA and Theta scored OWA 0.915 (OWA = 1 is Naive2).
+  Seasonal naive is a weak bar on this data (OWA 1.220), so the MASE gains below look larger
+  than the OWA ones.
+* **A zero-shot foundation model beat every trained method, with a caveat.** Chronos-2
+  (120M, no fitting) scored OWA 0.897 and MASE 0.943 vs Comb's 0.915 and 0.955, with the best
+  interval score (MSIS 8.50 vs 9.09). Chronos-2's pretraining data may include M4 and the UCI
+  electricity series, so this is an upper bound, not a clean held-out result. It ran on an
+  RTX 5070 Ti; the other models ran on CPU, so its 65 ms per series is not a like-for-like cost.
+  See [Foundation model and tuned LightGBM](#foundation-model-and-tuned-lightgbm).
 * **An equal-weight combination of ETS, ARIMA and Theta improved MASE by 28.0% against
   seasonal naive** (0.955 vs 1.326) across 1,500 series-windows. It beat seasonal naive on 81%
   of series (Wilcoxon, Holm-corrected p = 3e-51), with well-calibrated 80% intervals (79.7%
@@ -269,6 +280,34 @@ critical difference is 0.61 mean ranks, so:
   intervals cover far less than they claim.
 * **Error grows with the horizon for every model,** with a visible step after one full
   season, at month 13 ([plot](docs/results/m4-monthly/mase_by_step.png)).
+
+### Foundation model and tuned LightGBM
+
+Added 2026-11-27 after a review asked "did you compare against a foundation model, and was
+LightGBM tuned?". Same windows, horizons and scoring as every other model; the earlier 11
+models' scores were reused unchanged (they match the committed leaderboards to 3 decimals).
+
+| Model | M4 MASE | M4 OWA | M4 MSIS 95 | Electricity MASE | Electricity OWA | Electricity MSIS 95 |
+|---|---:|---:|---:|---:|---:|---:|
+| Chronos-2, zero-shot | **0.943** | **0.897** | **8.50** | **0.920** | **0.868** | **8.34** |
+| Comb (ETS+ARIMA+Theta) | 0.955 | 0.915 | 9.09 | 0.990 | 0.934 | 10.93 |
+| LightGBM, tuned per window | 1.116 | 1.024 | 11.04 | 0.979 | 0.920 | 10.87 |
+| LightGBM, defaults | 1.107 | 1.018 | 10.97 | 0.980 | 0.923 | 10.87 |
+| Naive2 | 1.063 | 1.000 | 11.67 | 1.055 | 1.000 | 13.12 |
+
+Against seasonal naive, Chronos-2 lowered MASE by 0.383 on M4 (CI −0.435 to −0.335, better on
+82% of series, Holm p = 1e-54) and by 0.091 on electricity (CI −0.116 to −0.065, p = 1e-16).
+
+- **Tuning did not help LightGBM.** Each window picks one of 8 configurations on the last h
+  points of its own training data (nested, so test data never informs the choice). That
+  changed MASE by +0.009 on M4 and −0.001 on electricity. The untuned results were not an
+  artefact of weak defaults.
+- **Chronos-2 caveats.** Its training corpus may overlap M4 and UCI electricity, which would
+  flatter it; we can't rule that out from the published data card, so treat its lead as an
+  upper bound. It ran on a GPU (65 ms per series on M4, 10 ms on electricity) while every
+  other model ran on the Ryzen 7 9800X3D CPU. Install with `pip install -e ".[fm]"`.
+- Full tables: [m4-monthly](docs/results/m4-monthly/report.md),
+  [electricity-daily](docs/results/electricity-daily/report.md).
 
 ### Robustness: a second, independent sample of 500 series
 
