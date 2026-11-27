@@ -184,3 +184,21 @@ def test_calibration_spans_about_one_year_per_dataset():
 
     assert calibration_origins(DATASETS["m4-monthly"], 18) == 1  # one origin already > a year
     assert calibration_origins(DATASETS["electricity-daily"], 14) == 26
+
+
+def test_chronos_contract(frame):
+    pytest.importorskip("chronos")
+    fc = build("chronos").forecast(frame, H, SEASON, LEVELS)
+    assert len(fc) == 3 * H
+    assert np.isfinite(fc.drop(columns="unique_id").to_numpy(float)).all()
+    assert (fc["lo-95"] <= fc["lo-80"] + 1e-6).all()
+    assert (fc["hi-80"] <= fc["hi-95"] + 1e-6).all()
+
+
+def test_lgbm_tuned_picks_from_grid_without_seeing_the_test_window(frame):
+    from ts_forecasting.models import LightGBMTuned
+
+    model = build("lgbm_tuned", n_jobs=1)
+    model.forecast(frame, H, SEASON, LEVELS)
+    chosen = {k: v for k, v in model.chosen[0].items() if k != "inner_mase"}
+    assert chosen in LightGBMTuned.GRID

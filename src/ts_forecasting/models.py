@@ -16,6 +16,8 @@ returns the next `h` point forecasts and prediction intervals for each series, a
 | prophet | additive trend + yearly seasonality                                | prophet        |
 | lgbm    | one global LightGBM over all series, lag + calendar features       | lightgbm       |
 | comb    | mean of ets, arima and theta (the M4 "Comb"-style combination)     | -              |
+| lgbm_tuned | lgbm with hyperparameters chosen per window on an inner validation split | lightgbm |
+| chronos | Chronos-2 (120M) zero-shot foundation model, quantile forecasts    | chronos        |
 """
 
 from __future__ import annotations
@@ -463,6 +465,59 @@ class LightGBMGlobal:
         return pd.concat(frames, ignore_index=True)
 
 
+class LightGBMTuned(LightGBMGlobal):
+    """`lgbm` with its hyperparameters chosen inside each backtest window.
+
+    Nested validation, so the test window is never seen: within the window's training data,
+    the last `h` points of every series are held out, each configuration in `GRID` is fitted
+    on the rest and scored by mean MASE on the held-out points, and the best one is then used
+    for the window's forecast (refitted on all its training data, with the same conformal
+    intervals as `lgbm`).
+    """
+
+    GRID = [
+        {"num_leaves": leaves, "learning_rate": lr, "n_estimators": trees,
+         "min_child_samples": child}
+        for leaves in (15, 63)
+        for lr, trees in ((0.03, 500), (0.1, 200))
+        for child in (20, 100)
+    ]  # fmt: skip
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.name = "lgbm_tuned"
+        self.base_params = dict(self.params)
+        self.chosen: list[dict] = []
+
+    def _select(self, train: pd.DataFrame, h: int, season: int) -> dict:
+        from ts_forecasting.metrics import mase
+
+        position = train.groupby("unique_id", sort=False).cumcount(ascending=False)
+        inner, held = train[position >= h], train[position < h]
+        lengths = inner.groupby("unique_id", sort=False).size()
+        keep = lengths.index[lengths > season]
+        inner, held = inner[inner["unique_id"].isin(keep)], held[held["unique_id"].isin(keep)]
+        actual = {u: g["y"].to_numpy(float) for u, g in held.groupby("unique_id", sort=False)}
+        history = {u: g["y"].to_numpy(float) for u, g in inner.groupby("unique_id", sort=False)}
+        scores = []
+        for config in self.GRID:
+            self.params = {**self.base_params, **config}
+            pred = self._predict(self._fit(inner, season), inner, h, season)
+            errs = [mase(actual[u], s * sc, history[u], season) for u, (s, sc) in pred.items()]
+            scores.append(float(np.nanmean(errs)))
+        best = self.GRID[int(np.argmin(scores))]
+        self.chosen.append({**best, "inner_mase": min(scores)})
+        log = logging.getLogger(__name__)
+        log.info("lgbm_tuned picked %s (inner MASE %.3f)", best, min(scores))
+        return best
+
+    def forecast(self, train, h, season, levels=(80, 95)):
+        train = train.sort_values(["unique_id", "ds"])
+        best = self._select(train, h, season)
+        self.params = {**self.base_params, **best}
+        return super().forecast(train, h, season, levels)
+
+
 class Combination:
     """Equal-weight mean of member forecasts (points and interval bounds)."""
 
@@ -478,6 +533,66 @@ class Combination:
         return (sum(frames) / len(frames)).reset_index()
 
 
+class ChronosModel:
+    """Zero-shot forecasts from a pretrained time-series foundation model (Chronos-2).
+
+    No training on the benchmark: each series' history is the model's context, and the model
+    returns quantiles directly. The point forecast is the median; the 80% and 95% intervals are
+    the 10-90% and 2.5-97.5% quantiles (Chronos-2 is trained on 21 quantiles from 1% to 99%
+    and interpolates between them). Each series is forecast on its own (no cross-learning), so
+    the comparison with the univariate statistical models is like for like.
+
+    Caveat: Chronos-2 was pretrained on large public corpora (`autogluon/chronos_datasets`,
+    GIFT-Eval pretraining data) that include M4 and electricity series, so some test periods
+    may have been seen in pretraining. Treat its scores here as an optimistic estimate.
+    """
+
+    name = "chronos"
+
+    def __init__(self, model_id: str = "amazon/chronos-2", device: str | None = None,
+                 batch_size: int = 256):  # fmt: skip
+        self.model_id = model_id
+        self.device = device
+        self.batch_size = batch_size
+        self._pipeline = None
+
+    def _load(self):
+        if self._pipeline is None:
+            import torch
+            from chronos import BaseChronosPipeline
+
+            device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+            self._pipeline = BaseChronosPipeline.from_pretrained(self.model_id, device_map=device)
+        return self._pipeline
+
+    def forecast(self, train, h, season, levels=(80, 95)):
+        import torch
+
+        pipeline = self._load()
+        train = train.sort_values(["unique_id", "ds"])
+        uids, contexts = [], []
+        for uid, g in train.groupby("unique_id", sort=False):
+            uids.append(uid)
+            contexts.append(torch.tensor(g["y"].to_numpy(float), dtype=torch.float32))
+        bounds = [0.5 - lv / 200 for lv in levels] + [0.5 + lv / 200 for lv in levels]
+        q_levels = sorted({0.5, *bounds})
+        frames = []
+        for start in range(0, len(contexts), self.batch_size):
+            batch = contexts[start : start + self.batch_size]
+            quantiles, _mean = pipeline.predict_quantiles(
+                batch, prediction_length=h, quantile_levels=q_levels
+            )
+            for i, uid in enumerate(uids[start : start + self.batch_size]):
+                q = quantiles[i].reshape(h, len(q_levels)).numpy()
+                col = {lv: q[:, j] for j, lv in enumerate(q_levels)}
+                out = {"unique_id": uid, "step": np.arange(1, h + 1), "mean": col[0.5]}
+                for level in levels:
+                    out[f"lo-{level}"] = col[0.5 - level / 200]
+                    out[f"hi-{level}"] = col[0.5 + level / 200]
+                frames.append(pd.DataFrame(out))
+        return pd.concat(frames, ignore_index=True)
+
+
 def build(name: str, n_jobs: int = -1, seed: int = 42, calibration_origins: int = 1) -> Forecaster:
     """Instantiate a model by name. `calibration_origins` applies to `lgbm` (see LightGBMGlobal);
     the benchmark sets it per dataset."""
@@ -488,6 +603,10 @@ def build(name: str, n_jobs: int = -1, seed: int = 42, calibration_origins: int 
             "comb", [StatsForecastModel(n, n_jobs) for n in ("ets", "arima", "theta")]
         )
     factories = {
+        "chronos": ChronosModel,
+        "lgbm_tuned": lambda: LightGBMTuned(
+            seed=seed, n_jobs=n_jobs, calibration_origins=calibration_origins
+        ),
         "naive": Naive,
         "snaive": SeasonalNaive,
         "naive2": Naive2,
@@ -518,4 +637,8 @@ MODEL_NAMES = (
     "sarima",
     "prophet",
     "lgbm",
+    "lgbm_tuned",
 )
+# Foundation models need the optional `fm` extra (torch + chronos-forecasting); run them with
+# `--models ...,chronos`.
+FM_MODEL_NAMES = ("chronos",)

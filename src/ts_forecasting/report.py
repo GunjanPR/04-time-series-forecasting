@@ -47,6 +47,8 @@ LABELS = {
     "prophet": "Prophet",
     "lgbm": "LightGBM (global model)",
     "lgbm_global": "LightGBM, pooled intervals (ablation)",
+    "lgbm_tuned": "LightGBM, tuned per window (nested)",
+    "chronos": "Chronos-2 (zero-shot foundation model)",
 }
 
 

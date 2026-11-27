@@ -30,6 +30,11 @@ dependencies = [
 tracking = [
     "mlflow>=2.15",
 ]
+# Zero-shot foundation model (Chronos-2); GPU optional
+fm = [
+    "chronos-forecasting>=2.0",
+    "torch>=2.4",
+]
 # Streamlit results dashboard (make dashboard)
 dashboard = [
     "streamlit>=1.38",
