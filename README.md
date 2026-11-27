@@ -13,7 +13,8 @@ interval scoring, runtime cost and significance tests.
   of series (Wilcoxon, Holm-corrected p = 3e-51), with well-calibrated 80% intervals (79.7%
   coverage).
 * **The cheap model is nearly as good, but not equal.** AutoETS alone improved MASE by
-  25.4% at 5% of the combination's compute (150 ms vs 2.9 s per series on one core). The
+  25.4% at 5-7% of the combination's compute (150 ms vs 2.9 s per series on one laptop core;
+  119 ms vs 1.6 s on one Ryzen 7 9800X3D core). The
   Nemenyi test could not separate the two on this sample, but on a second, independent
   500-series sample it could (mean-rank gap 0.73 > 0.61), so "statistically tied" did not
   replicate.
@@ -210,6 +211,26 @@ Named baseline: **seasonal naive**. Lower is better everywhere.
 *OWA = M4 Overall Weighted Average relative to Naive2. The single-core column comes from a
 separate 100-series, 1-window run with `--n-jobs 1`. The combination is charged the summed
 runtime of its three members.*
+
+**Runtime on a desktop (2026-11-27).** The same two runs on an AMD Ryzen 7 9800X3D (8 cores /
+16 threads, Windows 11). Every MASE matched the table above to three decimals (AutoARIMA
+0.997 vs 0.998), and the ranking is identical. The full 500-series benchmark took 7 min 10 s.
+
+| Model | ms / series, 16 workers | ms / series, 1 core |
+|---|---|---|
+| Comb (ETS+ARIMA+Theta) | 240 | 1,605 |
+| AutoETS | 26 | 119 |
+| SARIMA airline | 14 | 105 |
+| AutoTheta | 16 | 17 |
+| AutoARIMA | 198 | 1,469 |
+| Naive2 | 0.6 | 0.5 |
+| LightGBM | 8.3 | 31 |
+| Naive | 0.2 | 0.2 |
+| Seasonal naive | 0.2 | 0.4 |
+| Prophet | 14.5 | 147 |
+
+On one core, AutoETS costs 7% of the combination here (119 ms vs 1.6 s), against 5% on the
+laptop.
 
 **Is it significant?** ([full table](docs/results/m4-monthly/report.md))
 

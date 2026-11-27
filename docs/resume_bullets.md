@@ -17,7 +17,8 @@ github.com/GunjanPR/04-time-series-forecasting
    the 10-method ranking replicated (Spearman 0.92) and Prophet was last on both samples
    (10-13% worse than seasonal naive, 61% coverage of 95% intervals), but AutoETS's
    statistical tie with the best method did not (Nemenyi mean-rank gap 0.73 > CD 0.61). It
-   stays within 4-5% of the best MASE at 5% of the compute (150 ms vs 2.9 s per series).
+   stays within 4-5% of the best MASE at 5-7% of the compute (150 ms vs 2.9 s per series on
+   one laptop core, 119 ms vs 1.6 s on a Ryzen 7 9800X3D core).
    *(README, "Robustness"; docs/results/m4-monthly-seed7/sample_comparison.csv)*
 
 3. Cut the LightGBM prediction-interval score (MSIS) by 51% (22.4 → 11.0) at unchanged 95%
